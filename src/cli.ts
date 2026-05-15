@@ -1,49 +1,70 @@
-import { writeFile } from 'node:fs/promises';
+import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { extractPage } from './extract.js';
+import { extractAllPages, extractPage } from './extract.js';
 import { buildPptx } from './pptx-build.js';
+import type { IRPage } from './types.js';
+
+function help() {
+  console.error(`usage:
+  slide-to-pptx spike <slide-dir>             # one page (--page Name, default SystemDiagram)
+  slide-to-pptx extract <slide-dir> [--all]   # IR JSON only
+  slide-to-pptx build <slide-dir> [--all]     # IR + pptx`);
+}
 
 async function main() {
-  const [cmd, slideArg, ...rest] = process.argv.slice(2);
-  if (!cmd) {
-    console.error('usage: slide-to-pptx <spike|extract|build> <slide-dir> [--page <name>]');
-    process.exit(1);
-  }
+  const args = process.argv.slice(2);
+  const [cmd, slideArg, ...rest] = args;
+  if (!cmd || !slideArg) { help(); process.exit(1); }
+
   const slideDir = path.resolve(slideArg);
-
+  const all = rest.includes('--all');
   const pageFlagIdx = rest.indexOf('--page');
-  const pageName =
-    pageFlagIdx >= 0 ? rest[pageFlagIdx + 1] : 'SystemDiagram';
+  const pageName = pageFlagIdx >= 0 ? rest[pageFlagIdx + 1] : 'SystemDiagram';
 
-  switch (cmd) {
-    case 'extract': {
-      const ir = await extractPage(slideDir, { pageName });
-      const outDir = path.resolve('out');
-      const { mkdir } = await import('node:fs/promises');
-      await mkdir(outDir, { recursive: true });
-      const outPath = path.join(outDir, `${ir.pageName}.ir.json`);
-      await writeFile(outPath, JSON.stringify(ir, null, 2), 'utf8');
-      console.log(`IR written: ${outPath}`);
-      console.log(`  pageName=${ir.pageName} items=${ir.items.length}`);
-      return;
+  const outDir = path.resolve('out');
+  await mkdir(outDir, { recursive: true });
+
+  const pages: IRPage[] = all
+    ? await extractAllPages(slideDir)
+    : [await extractPage(slideDir, { pageName })];
+
+  for (const p of pages) {
+    const irPath = path.join(outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
+    await writeFile(irPath, JSON.stringify(p, null, 2), 'utf8');
+  }
+  console.log(`IR written: ${pages.length} page(s)`);
+  printCoverage(pages);
+
+  if (cmd === 'extract') return;
+
+  const pptxName = all
+    ? `${path.basename(slideDir)}.pptx`
+    : `${pages[0].pageName}.pptx`;
+  const pptxPath = path.join(outDir, pptxName);
+  await buildPptx(pages, pptxPath, slideDir);
+  console.log(`PPTX written: ${pptxPath}`);
+}
+
+function printCoverage(pages: IRPage[]) {
+  const known = new Set([
+    'Box', 'Arrow', 'PageHeading', 'FooterRule', 'FooterLabel', 'PageNum',
+    'ProgressTrack', 'AgendaRow', 'ParamRow', 'BitField', 'Gate', 'FSMNode',
+    'TextBlock',
+  ]);
+  for (const p of pages) {
+    const counts: Record<string, number> = {};
+    for (const it of p.items) {
+      counts[it.kind] = (counts[it.kind] ?? 0) + 1;
     }
-    case 'build':
-    case 'spike': {
-      const ir = await extractPage(slideDir, { pageName });
-      const outDir = path.resolve('out');
-      const { mkdir } = await import('node:fs/promises');
-      await mkdir(outDir, { recursive: true });
-      const irPath = path.join(outDir, `${ir.pageName}.ir.json`);
-      await writeFile(irPath, JSON.stringify(ir, null, 2), 'utf8');
-      console.log(`IR: ${irPath} (items=${ir.items.length})`);
-      const pptxPath = path.join(outDir, `${ir.pageName}.pptx`);
-      await buildPptx([ir], pptxPath);
-      console.log(`PPTX: ${pptxPath}`);
-      return;
+    const unsupported = p.items.filter((it) => it.kind === 'Unsupported') as any[];
+    const summary = Object.entries(counts)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(' ');
+    const mark = unsupported.length ? '!' : ' ';
+    console.log(`  ${mark} ${p.pageIndex.toString().padStart(2)} ${p.pageName.padEnd(22)} ${summary}`);
+    for (const u of unsupported) {
+      console.log(`        ↳ unsupported: ${u.name}`);
     }
-    default:
-      console.error(`unknown cmd: ${cmd}`);
-      process.exit(1);
   }
 }
 
