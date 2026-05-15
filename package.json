@@ -1,0 +1,25 @@
+{
+  "name": "slide-to-pptx",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "slide-to-pptx": "./dist/cli.js"
+  },
+  "scripts": {
+    "extract": "tsx src/cli.ts extract",
+    "build-pptx": "tsx src/cli.ts build",
+    "spike": "tsx src/cli.ts spike ../my-slide/slides/mac-merge-tx-spec"
+  },
+  "dependencies": {
+    "esbuild": "^0.24.0",
+    "pptxgenjs": "^3.12.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
