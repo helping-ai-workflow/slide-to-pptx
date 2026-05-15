@@ -12,9 +12,12 @@
     "spike": "tsx src/cli.ts spike ../my-slide/slides/mac-merge-tx-spec"
   },
   "dependencies": {
+    "@types/react-dom": "^18.3.7",
     "esbuild": "^0.24.0",
+    "playwright": "^1.60.0",
     "pptxgenjs": "^3.12.0",
-    "react": "^18.3.1"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

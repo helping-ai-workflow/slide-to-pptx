@@ -20,8 +20,9 @@ const PX_PER_INCH_Y = CANVAS_H_PX / SLIDE_H_IN; // 144
 const px = (p: number) => p / PX_PER_INCH_X;
 const py = (p: number) => p / PX_PER_INCH_Y;
 
-// 1 px ≈ 0.75 pt for font sizes (web px → pt)
-const fpt = (p: number) => +(p * 0.75).toFixed(2);
+// Canvas 1920x1080 px maps to 13.333x7.5 inch (144 canvas-px/inch).
+// Font sizes use the same scale: 1 canvas-px = 72/144 = 0.5 pt.
+const fpt = (p: number) => +(p * 0.5).toFixed(2);
 
 const hex = (c?: string) => {
   if (!c) return '000000';
@@ -151,12 +152,13 @@ function renderPageNum(
   slide: pptxgen.Slide,
   it: Extract<IRItem, { kind: 'PageNum' }>,
 ) {
-  slide.addText(`${it.n} / ${it.total}`, {
-    x: px(1920 - 100 - 200), y: py(1080 - 56 - 24), w: px(200), h: 0.3,
-    align: 'right',
-    fontFace: MONO, fontSize: fpt(20),
-    color: '64748b',
-    charSpacing: 4,
+  const n = String(it.n).padStart(2, '0');
+  const total = String(it.total).padStart(2, '0');
+  slide.addText(`${n} / ${total}`, {
+    x: px(1920 - 100 - 400), y: py(1080 - 56 - 28), w: px(400), h: 0.5,
+    align: 'right', valign: 'middle',
+    fontFace: BODY, fontSize: fpt(20),
+    color: '64748B',
   });
 }
 

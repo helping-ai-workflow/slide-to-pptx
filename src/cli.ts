@@ -1,32 +1,54 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { extractAllPages, extractPage } from './extract.js';
+import { renderSlideHtml } from './render-html.js';
+import { measureSlide } from './extract-pw.js';
+import { measureToIR } from './measure-to-ir.js';
 import { buildPptx } from './pptx-build.js';
 import type { IRPage } from './types.js';
 
 function help() {
   console.error(`usage:
-  slide-to-pptx spike <slide-dir>             # one page (--page Name, default SystemDiagram)
-  slide-to-pptx extract <slide-dir> [--all]   # IR JSON only
-  slide-to-pptx build <slide-dir> [--all]     # IR + pptx`);
+  slide-to-pptx build <slide-dir> [--page <name>]   # IR + pptx for one page or all
+  slide-to-pptx extract <slide-dir> [--page <name>] # IR JSON only
+  slide-to-pptx html <slide-dir>                    # dump per-page HTML for debug`);
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const [cmd, slideArg, ...rest] = args;
+  const [cmd, slideArg, ...rest] = process.argv.slice(2);
   if (!cmd || !slideArg) { help(); process.exit(1); }
 
   const slideDir = path.resolve(slideArg);
-  const all = rest.includes('--all');
   const pageFlagIdx = rest.indexOf('--page');
-  const pageName = pageFlagIdx >= 0 ? rest[pageFlagIdx + 1] : 'SystemDiagram';
+  const pageFilter = pageFlagIdx >= 0 ? rest[pageFlagIdx + 1] : null;
 
   const outDir = path.resolve('out');
   await mkdir(outDir, { recursive: true });
 
-  const pages: IRPage[] = all
-    ? await extractAllPages(slideDir)
-    : [await extractPage(slideDir, { pageName })];
+  if (cmd === 'html') {
+    const allHtml = await renderSlideHtml(slideDir);
+    for (const p of allHtml) {
+      const hp = path.join(outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.html`);
+      await writeFile(hp, p.html, 'utf8');
+    }
+    console.log(`HTML written: ${allHtml.length} page(s) → ${outDir}`);
+    return;
+  }
+
+  if (cmd !== 'build' && cmd !== 'extract') {
+    help(); process.exit(1);
+  }
+
+  const allHtml = await renderSlideHtml(slideDir);
+  const selected = pageFilter
+    ? allHtml.filter((p) => p.pageName === pageFilter)
+    : allHtml;
+  if (selected.length === 0) {
+    console.error(`no page matched filter "${pageFilter}"`);
+    process.exit(1);
+  }
+
+  const measures = await measureSlide(selected);
+  const pages: IRPage[] = measures.map(measureToIR);
 
   for (const p of pages) {
     const irPath = path.join(outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
@@ -37,29 +59,22 @@ async function main() {
 
   if (cmd === 'extract') return;
 
-  const pptxName = all
-    ? `${path.basename(slideDir)}.pptx`
-    : `${pages[0].pageName}.pptx`;
+  const pptxName = pageFilter
+    ? `${pages[0].pageName}.pptx`
+    : `${path.basename(slideDir)}.pptx`;
   const pptxPath = path.join(outDir, pptxName);
   await buildPptx(pages, pptxPath, slideDir);
   console.log(`PPTX written: ${pptxPath}`);
 }
 
 function printCoverage(pages: IRPage[]) {
-  const known = new Set([
-    'Box', 'Arrow', 'PageHeading', 'FooterRule', 'FooterLabel', 'PageNum',
-    'ProgressTrack', 'AgendaRow', 'ParamRow', 'BitField', 'Gate', 'FSMNode',
-    'TextBlock',
-  ]);
   for (const p of pages) {
     const counts: Record<string, number> = {};
     for (const it of p.items) {
       counts[it.kind] = (counts[it.kind] ?? 0) + 1;
     }
     const unsupported = p.items.filter((it) => it.kind === 'Unsupported') as any[];
-    const summary = Object.entries(counts)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(' ');
+    const summary = Object.entries(counts).map(([k, v]) => `${k}=${v}`).join(' ');
     const mark = unsupported.length ? '!' : ' ';
     console.log(`  ${mark} ${p.pageIndex.toString().padStart(2)} ${p.pageName.padEnd(22)} ${summary}`);
     for (const u of unsupported) {
