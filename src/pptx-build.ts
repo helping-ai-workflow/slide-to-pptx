@@ -1,6 +1,7 @@
 import pptxgen from 'pptxgenjs';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { IRItem, IRPage } from './types.js';
 
 const FONT_MAP = {
@@ -362,12 +363,21 @@ function renderImage(
   assetRoot: string,
 ) {
   const x = px(it.x), y = py(it.y), w = px(it.w), h = py(it.h);
-  const resolved = path.isAbsolute(it.src)
-    ? it.src
-    : path.resolve(assetRoot, it.src);
+  if (it.src.startsWith('data:')) {
+    slide.addImage({ data: it.src, x, y, w, h, sizing: { type: 'contain', w, h } });
+    return;
+  }
+  let resolved: string;
+  if (it.src.startsWith('file://')) {
+    resolved = fileURLToPath(it.src);
+  } else if (path.isAbsolute(it.src)) {
+    resolved = it.src;
+  } else {
+    resolved = path.resolve(assetRoot, it.src);
+  }
   if (!existsSync(resolved)) {
-    slide.addText(`[missing image: ${it.src}]`, {
-      x, y, w, h, fontFace: MONO, fontSize: 10, color: 'aa0000',
+    slide.addText(`[missing image: ${it.src.slice(0, 80)}]`, {
+      x, y, w, h, fontFace: MONO, fontSize: 10, color: 'AA0000',
     });
     return;
   }

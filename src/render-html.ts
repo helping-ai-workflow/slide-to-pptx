@@ -1,9 +1,18 @@
 import React from 'react';
 import ReactDOMServer from 'react-dom/server';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { loadSlideModule } from './load-slide.js';
 import { instrumentTree, type PrimRecord } from './instrument.js';
+
+const MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+};
 
 export type PageHtml = {
   pageIndex: number;
@@ -16,13 +25,26 @@ function escAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
-function rewriteAssetUrls(html: string, slideDir: string): string {
+async function rewriteAssetUrls(html: string, slideDir: string, assetMap: Map<string, string>): Promise<string> {
   // Slide module's asset imports were stubbed to their relative specifier
-  // (e.g. "./assets/foo.png"). Convert to absolute file:// URLs so playwright
-  // (loading via data: or file:) can resolve them.
-  return html.replace(/(src|href)="(\.\/[^"]+)"/g, (_m, attr, rel) => {
+  // (e.g. "./assets/foo.png"). Inline as data: URLs so headless chromium does
+  // not need filesystem access and the natural image size loads correctly.
+  const matches = [...html.matchAll(/(src|href)="(\.\/[^"]+)"/g)];
+  for (const m of matches) {
+    const rel = m[2];
+    if (assetMap.has(rel)) continue;
     const abs = path.resolve(slideDir, rel);
-    return `${attr}="${pathToFileURL(abs).href}"`;
+    try {
+      const buf = await readFile(abs);
+      const ext = path.extname(abs).toLowerCase();
+      const mime = MIME[ext] ?? 'application/octet-stream';
+      assetMap.set(rel, `data:${mime};base64,${buf.toString('base64')}`);
+    } catch {
+      assetMap.set(rel, rel); // missing — leave as-is
+    }
+  }
+  return html.replace(/(src|href)="(\.\/[^"]+)"/g, (_m, attr, rel) => {
+    return `${attr}="${assetMap.get(rel) ?? rel}"`;
   });
 }
 
@@ -65,6 +87,7 @@ export async function renderSlideHtml(slideDir: string): Promise<PageHtml[]> {
   if (!Array.isArray(pages)) throw new Error('slide module default export must be an array of pages');
   const designCss = designToCss((mod as any).design);
 
+  const assetMap = new Map<string, string>();
   const out: PageHtml[] = [];
   for (let i = 0; i < pages.length; i++) {
     const PageFn = pages[i] as any;
@@ -79,7 +102,7 @@ export async function renderSlideHtml(slideDir: string): Promise<PageHtml[]> {
     } catch (e: any) {
       body = `<div style="color:red;padding:40px">extract error: ${escAttr(String(e?.message ?? e))}</div>`;
     }
-    body = rewriteAssetUrls(body, slideDir);
+    body = await rewriteAssetUrls(body, slideDir, assetMap);
     out.push({ pageIndex: i, pageName, html: htmlShell(body, designCss), primitives });
   }
   return out;

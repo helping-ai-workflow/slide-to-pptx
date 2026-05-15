@@ -32,12 +32,21 @@ export type ImageLeaf = {
   alt?: string;
 };
 
+export type DecorBox = {
+  rect: Rect;
+  background?: string;
+  borderColor?: string;
+  borderWidth: number;
+  borderRadius: number;
+};
+
 export type PageMeasure = {
   pageIndex: number;
   pageName: string;
   primitives: PrimMeasure[];
   texts: TextLeaf[];
   images: ImageLeaf[];
+  decors: DecorBox[];
 };
 
 const EXTRACT_SCRIPT = `(() => {
@@ -69,7 +78,11 @@ const EXTRACT_SCRIPT = `(() => {
   const images = [];
   for (const img of document.querySelectorAll('img')) {
     if (inPrim.has(img)) continue;
-    images.push({ rect: pickRect(img), src: img.getAttribute('src') || '', alt: img.getAttribute('alt') || '' });
+    // Use the positioned wrapper as the rect so an image with objectFit:contain
+    // shrinking inside a 540x700 panel still fills the panel in pptx.
+    const wrapper = img.parentElement;
+    const rect = wrapper ? pickRect(wrapper) : pickRect(img);
+    images.push({ rect, src: img.getAttribute('src') || '', alt: img.getAttribute('alt') || '' });
   }
 
   const trim = (s) => (s || '').replace(/\\s+/g, ' ').trim();
@@ -92,7 +105,7 @@ const EXTRACT_SCRIPT = `(() => {
   };
   const parsePx = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
-  const INLINE_TAGS = new Set(['SPAN','EM','STRONG','B','I','A','CODE','SUP','SUB','MARK','U','SMALL','KBD','SAMP','VAR']);
+  const INLINE_TAGS = new Set(['SPAN','EM','STRONG','B','I','A','CODE','SUP','SUB','MARK','U','SMALL','KBD','SAMP','VAR','BR','WBR','NOBR']);
   const isInlineEl = (n) => n.nodeType === 1 && INLINE_TAGS.has(n.tagName);
 
   const texts = [];
@@ -146,7 +159,45 @@ const EXTRACT_SCRIPT = `(() => {
     });
   }
 
-  return { primitives, texts, images };
+  // Decor boxes: elements with background/border that DO NOT have direct text.
+  // Captures card chrome (the wrapper <div> around card content).
+  const decors = [];
+  for (const el of all) {
+    if (inPrim.has(el)) continue;
+    if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
+    if (INLINE_TAGS.has(el.tagName)) continue;
+    if (el.closest('[data-prim-id]')) continue;
+
+    // skip if this element is itself emitted as a text leaf (has own text)
+    let hasOwnText = false;
+    let hasBlockChild = false;
+    for (const c of el.childNodes) {
+      if (c.nodeType === 3 && c.textContent && c.textContent.trim()) hasOwnText = true;
+      else if (c.nodeType === 1) {
+        if (!isInlineEl(c)) hasBlockChild = true;
+        else if (c.textContent && c.textContent.trim()) hasOwnText = true;
+      }
+    }
+    if (hasOwnText && !hasBlockChild) continue;
+
+    const cs = getComputedStyle(el);
+    const bg = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? colorRgbToHex(cs.backgroundColor) : '';
+    const hasBorder = cs.borderTopWidth !== '0px';
+    const bw = parsePx(cs.borderTopWidth);
+    if (!bg && !hasBorder) continue;
+
+    const rect = pickRect(el);
+    if (rect.w <= 0 || rect.h <= 0) continue;
+    decors.push({
+      rect,
+      background: bg || '',
+      borderColor: hasBorder ? colorRgbToHex(cs.borderTopColor) : '',
+      borderWidth: bw,
+      borderRadius: parsePx(cs.borderTopLeftRadius),
+    });
+  }
+
+  return { primitives, texts, images, decors };
 })()`;
 
 export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
@@ -163,7 +214,7 @@ export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
       // design tokens, but Chromium occasionally measures pre-swap)
       await page.evaluate(() => (document as any).fonts?.ready);
       const raw = await page.evaluate(EXTRACT_SCRIPT);
-      const r = raw as { primitives: any[]; texts: TextLeaf[]; images: ImageLeaf[] };
+      const r = raw as { primitives: any[]; texts: TextLeaf[]; images: ImageLeaf[]; decors: DecorBox[] };
       const primitives = r.primitives.map((entry: any) => {
         const rec = propsById.get(entry.id);
         return {
@@ -174,7 +225,7 @@ export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
           props: rec?.props ?? {},
         } as PrimMeasure;
       });
-      out.push({ pageIndex: p.pageIndex, pageName: p.pageName, primitives, texts: r.texts, images: r.images });
+      out.push({ pageIndex: p.pageIndex, pageName: p.pageName, primitives, texts: r.texts, images: r.images, decors: r.decors });
     }
   } finally {
     await browser.close();

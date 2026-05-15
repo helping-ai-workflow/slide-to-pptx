@@ -15,8 +15,37 @@ function pickFontFamily(family: string): 'mono' | 'body' | 'display' | undefined
   return 'body';
 }
 
+const CANVAS_AREA = 1920 * 1080;
+
 export function measureToIR(m: PageMeasure): IRPage {
   const items: IRItem[] = [];
+
+  // Decor boxes first (drawn back-most) — filter out the body / grid-bg
+  // wrapper that already matches the page background.
+  for (const d of m.decors) {
+    const area = d.rect.w * d.rect.h;
+    if (area > CANVAS_AREA * 0.9) continue; // skip whole-page bg
+    items.push({
+      kind: 'TextBlock',
+      x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h,
+      text: '',
+      fontSize: 1,
+      color: '#000000',
+      background: d.background || undefined,
+      borderColor: d.borderColor || undefined,
+      padding: 0,
+    });
+  }
+
+  // Images next — large opaque content drawn before chrome primitives like
+  // FooterRule so the footer paints on top, matching source DOM stacking.
+  for (const im of m.images) {
+    items.push({
+      kind: 'Image',
+      x: im.rect.x, y: im.rect.y, w: im.rect.w, h: im.rect.h,
+      src: im.src, alt: im.alt,
+    });
+  }
 
   // Primitives → typed IR with browser rect overriding any prop-derived xy/wh.
   for (const p of m.primitives) {
@@ -116,15 +145,6 @@ export function measureToIR(m: PageMeasure): IRPage {
       default:
         items.push({ kind: 'Unsupported', name: p.name, x: rect.x, y: rect.y });
     }
-  }
-
-  // Images
-  for (const im of m.images) {
-    items.push({
-      kind: 'Image',
-      x: im.rect.x, y: im.rect.y, w: im.rect.w, h: im.rect.h,
-      src: im.src, alt: im.alt,
-    });
   }
 
   // Inline text leaves
