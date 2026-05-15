@@ -115,14 +115,16 @@ function renderPageHeading(
   slide.addText(`§ ${it.num} · ${it.kicker}`, {
     x, y, w: px(1720), h: 0.4,
     fontFace: MONO, fontSize: fpt(20),
-    color: '0891b2',
+    color: '0891B2',
     charSpacing: 2,
   });
   slide.addText(it.title, {
-    x, y: y + 0.4, w: px(1720), h: 1.2,
-    fontFace: BODY, fontSize: fpt(72), bold: true,
-    color: '1a1f2e',
-  });
+    x, y: y + 0.4, w: px(1720), h: 0.9,
+    fontFace: BODY, fontSize: fpt(60), bold: true,
+    color: '1A1F2E',
+    valign: 'top',
+    autoFit: true,
+  } as any);
 }
 
 function renderFooterRule(slide: pptxgen.Slide) {

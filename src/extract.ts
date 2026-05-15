@@ -291,6 +291,150 @@ type WalkCtx = {
   inSVG: boolean;
 };
 
+// Walk children of an absolute frame that contains a mix of inline text divs
+// and recognised primitives. Maintain a flow cursor and emit text blocks at
+// the cursor position, while letting primitive record() advance the same
+// cursor for in-flow primitives (ParamRow, BitField, Gate, AgendaRow).
+function walkFrameChildrenInFlow(
+  el: React.ReactElement<any>,
+  frame: Frame,
+  parentStyle: any,
+  items: IRItem[],
+): void {
+  const children = React.Children.toArray((el.props as any)?.children);
+  const wrapperPad = num(parentStyle?.padding);
+  const innerX = frame.ox + wrapperPad;
+  const innerY = frame.oy + wrapperPad;
+  const innerW = frame.w - wrapperPad * 2;
+  const isFlexRow = parentStyle?.display === 'flex'
+    && (parentStyle?.flexDirection === 'row' || parentStyle?.flexDirection == null);
+  const gap = num(parentStyle?.gap);
+
+  // Optional decorative wrapper rect for background/border — height is
+  // patched after we know how much content was emitted.
+  let wrapperRect: IRItem | null = null;
+  if (parentStyle?.background || parentStyle?.border) {
+    wrapperRect = {
+      kind: 'TextBlock',
+      x: frame.ox, y: frame.oy, w: frame.w, h: frame.h,
+      text: '',
+      fontSize: 1,
+      color: '#000000',
+      background: typeof parentStyle?.background === 'string' ? parentStyle.background : undefined,
+      borderColor: typeof parentStyle?.border === 'string'
+        ? parentStyle.border.match(/#[0-9a-fA-F]{3,8}/)?.[0]
+        : undefined,
+      padding: 0,
+    };
+    items.push(wrapperRect);
+  }
+
+  // Pre-count primitives that need slot allocation (Gate in flex-row)
+  let gateCount = 0;
+  if (isFlexRow) {
+    for (const c of children) {
+      if (React.isValidElement(c) && nameOf((c as any).type) === 'Gate') gateCount++;
+    }
+  }
+
+  let cx = 0;
+  let cy = 0;
+
+  for (const c of children) {
+    if (c == null || typeof c === 'boolean') continue;
+    if (typeof c === 'string' || typeof c === 'number') continue;
+    if (!React.isValidElement(c)) continue;
+    const cEl = c as React.ReactElement<any>;
+    const cType = cEl.type;
+    const cProps = cEl.props as any;
+    const cStyle = cProps?.style;
+
+    // Function component → primitive or composite
+    if (typeof cType === 'function') {
+      const name = nameOf(cType);
+      if (PRIMITIVES.has(name)) {
+        const subFrame: Frame = {
+          ...frame,
+          ox: innerX, oy: innerY + cy, w: innerW,
+          cursorX: cx, cursorY: 0, gap,
+          flow: isFlexRow ? 'row' : 'block',
+          gateSlotCount: gateCount,
+          gateSlotW: gateCount > 0 ? Math.floor((innerW - gap * (gateCount - 1)) / gateCount) : 0,
+        };
+        record(name, cProps, subFrame, items);
+        if (isFlexRow) cx = subFrame.cursorX;
+        else cy += subFrame.cursorY;
+        continue;
+      }
+      try {
+        const rendered = (cType as any)(cProps);
+        walk(rendered, { frame, inSVG: false }, items);
+      } catch {}
+      continue;
+    }
+
+    // Host element
+    if (typeof cType === 'string') {
+      if (cType === 'img') {
+        const src = cProps?.src;
+        if (src) {
+          const h = 200;
+          items.push({
+            kind: 'Image',
+            x: innerX, y: innerY + cy, w: innerW, h,
+            src, alt: cProps?.alt,
+          });
+          cy += h;
+        }
+        continue;
+      }
+
+      const hasPrim = containsPrimitive(cEl);
+      if (hasPrim) {
+        // Nested wrapper containing primitives → recurse in flow
+        const subIsFlex = cStyle?.display === 'flex'
+          && (cStyle?.flexDirection === 'row' || cStyle?.flexDirection == null);
+        const subFrame: Frame = {
+          ox: innerX,
+          oy: innerY + cy,
+          w: innerW,
+          h: Math.max(frame.h - cy - wrapperPad * 2, 60),
+          flow: subIsFlex ? 'row' : 'block',
+          cursorX: 0, cursorY: 0,
+          gap: num(cStyle?.gap),
+          gateSlotCount: 0, gateSlotW: 0,
+        };
+        walkFrameChildrenInFlow(cEl, subFrame, cStyle ?? {}, items);
+        cy += subIsFlex ? BIT_H + 20 : Math.max(subFrame.cursorY, BIT_H);
+        continue;
+      }
+
+      const text = flatText(cProps?.children).replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      const tag = cType;
+      const tagFS = defaultFontSizeForTag(tag);
+      const fs = num(cStyle?.fontSize) || tagFS || num(parentStyle?.fontSize) || 20;
+      const mt = num(cStyle?.marginTop);
+      const mb = num(cStyle?.marginBottom);
+      const tagBold = tag === 'h1' || tag === 'h2' || tag === 'h3'
+        || tag === 'h4' || tag === 'strong';
+      const blockH = estimateBlockHeight(text, fs, innerW);
+      items.push(buildTextBlock(text, innerX, innerY + cy + mt, innerW, blockH, {
+        fontSize: fs, ...cStyle,
+        fontWeight: tagBold ? 700 : cStyle?.fontWeight,
+      }));
+      cy += mt + blockH + mb;
+      continue;
+    }
+  }
+
+  // Patch wrapper rect to span actual content height
+  if (wrapperRect && wrapperRect.kind === 'TextBlock') {
+    const finalH = Math.max(cy + wrapperPad * 2, frame.h);
+    wrapperRect.h = finalH;
+  }
+}
+
 function buildTextBlock(
   text: string,
   x: number, y: number, w: number, h: number,
@@ -541,13 +685,13 @@ function walk(node: any, ctx: WalkCtx, items: IRItem[]): void {
       }
 
       if (!hasPrim) {
-        // text-only absolute block — split into per-child TextBlocks if container
-        // has multiple immediate-child divs with own styling; else single block.
+        // text-only absolute block — split into per-child TextBlocks
         emitTextBlocks(el, frame, style, items);
         return;
       }
 
-      walk(children, { frame, inSVG: false }, items);
+      // Mixed: contains both inline text and primitives → unified flow walker
+      walkFrameChildrenInFlow(el, frame, style, items);
       return;
     }
 
