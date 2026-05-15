@@ -23,7 +23,16 @@ const py = (p: number) => p / PX_PER_INCH_Y;
 // 1 px ≈ 0.75 pt for font sizes (web px → pt)
 const fpt = (p: number) => +(p * 0.75).toFixed(2);
 
-const hex = (c?: string) => (c ? c.replace('#', '') : '000000');
+const hex = (c?: string) => {
+  if (!c) return '000000';
+  const s = c.replace('#', '').trim();
+  if (/^[0-9a-fA-F]{6}$/.test(s)) return s.toUpperCase();
+  if (/^[0-9a-fA-F]{8}$/.test(s)) return s.slice(0, 6).toUpperCase();
+  if (/^[0-9a-fA-F]{3}$/.test(s)) {
+    return (s[0] + s[0] + s[1] + s[1] + s[2] + s[2]).toUpperCase();
+  }
+  return '1A1F2E';
+};
 
 const MONO = 'JetBrains Mono';
 const BODY = 'Segoe UI';
@@ -210,23 +219,30 @@ function renderGate(slide: pptxgen.Slide, it: Extract<IRItem, { kind: 'Gate' }>)
   slide.addShape('roundRect', {
     x, y, w, h, rectRadius: 0.06,
     fill: { color: 'ffffff' },
-    line: { color: 'c2410c', width: 1.5 },
+    line: { color: 'C2410C', width: 1.5 },
   });
   const padX = px(24), padY = py(24);
+  const innerW = w - padX * 2;
+  const nameH = 0.5;
+  const srcH = 0.32;
+  const descGap = 0.12;
+  const descY = y + padY + nameH + descGap;
+  const descMaxY = y + h - padY - srcH - 0.05;
+  const descH = Math.max(descMaxY - descY, 0.1);
   slide.addText(it.name, {
-    x: x + padX, y: y + padY, w: w - padX * 2, h: 0.5,
-    fontFace: MONO, fontSize: fpt(26), bold: true,
-    color: 'c2410c',
-  });
+    x: x + padX, y: y + padY, w: innerW, h: nameH,
+    fontFace: BODY, fontSize: fpt(24), bold: true,
+    color: 'C2410C', valign: 'top', wrap: false, autoFit: true,
+  } as any);
   slide.addText(it.desc, {
-    x: x + padX, y: y + padY + 0.6, w: w - padX * 2, h: h - 1.4,
-    fontFace: BODY, fontSize: fpt(20), color: '334155',
-    valign: 'top',
-  });
+    x: x + padX, y: descY, w: innerW, h: descH,
+    fontFace: BODY, fontSize: fpt(18), color: '334155',
+    valign: 'top', autoFit: true,
+  } as any);
   slide.addText(it.src, {
-    x: x + padX, y: y + h - py(36), w: w - padX * 2, h: 0.3,
-    fontFace: MONO, fontSize: fpt(16), color: '64748b',
-    charSpacing: 1,
+    x: x + padX, y: y + h - padY - srcH, w: innerW, h: srcH,
+    fontFace: MONO, fontSize: fpt(16), color: '64748B',
+    charSpacing: 1, valign: 'top',
   });
 }
 
@@ -248,30 +264,40 @@ function renderFSMNode(slide: pptxgen.Slide, it: Extract<IRItem, { kind: 'FSMNod
 
 function renderTextBlock(slide: pptxgen.Slide, it: Extract<IRItem, { kind: 'TextBlock' }>) {
   const x = px(it.x), y = py(it.y), w = px(it.w), h = py(it.h);
+  if (w <= 0 || h <= 0) return;
   if (it.background || it.borderColor) {
     slide.addShape('roundRect', {
       x, y, w, h, rectRadius: 0.05,
       fill: it.background && it.background.startsWith('#')
         ? { color: hex(it.background) }
         : it.background
-          ? { color: 'f0f4f8' }  // approx rgba bgs
+          ? { color: 'f0f4f8' }
           : { color: 'ffffff', transparency: 100 },
       line: it.borderColor
         ? { color: hex(it.borderColor), width: 1 }
         : { type: 'none' },
     });
   }
+  if (!it.text || !it.text.trim()) return;
   const pad = it.padding ? py(it.padding) : 0;
   const fam = it.fontFamily ? FONT_MAP[it.fontFamily] : DEFAULT_BODY;
+  const tw = Math.max(w - pad * 2, 0.1);
+  const th = Math.max(h - pad * 2, 0.1);
+  const fs = Math.max(fpt(it.fontSize), 6);
+  // Centered text inside a styled wrapper (background/border) — typical
+  // "formula" / "callout" block: vertically center too.
+  const centerV = it.align === 'center' && (it.background || it.borderColor);
   slide.addText(it.text, {
-    x: x + pad, y: y + pad, w: w - pad * 2, h: h - pad * 2,
+    x: x + pad, y: y + pad, w: tw, h: th,
     fontFace: fam,
-    fontSize: fpt(it.fontSize),
-    color: it.color && it.color.startsWith('#') ? hex(it.color) : '1a1f2e',
+    fontSize: fs,
+    color: it.color && it.color.startsWith('#') ? hex(it.color) : '1A1F2E',
     bold: !!it.bold,
     align: (it.align as any) || 'left',
-    valign: 'top',
-  });
+    valign: centerV ? 'middle' : 'top',
+    autoFit: it.fontSize >= 48 ? true : undefined,
+    wrap: it.fontSize >= 80 ? false : true,
+  } as any);
 }
 
 function renderAgendaRow(slide: pptxgen.Slide, it: Extract<IRItem, { kind: 'AgendaRow' }>) {

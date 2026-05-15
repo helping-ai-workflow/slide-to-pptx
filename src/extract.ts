@@ -207,7 +207,7 @@ function record(name: string, props: any, frame: Frame, items: IRItem[]) {
       const slotW = frame.gateSlotW > 0 ? frame.gateSlotW : Math.floor((frame.w - frame.gap * (frame.gateSlotCount - 1)) / Math.max(frame.gateSlotCount, 1));
       const x = frame.ox + frame.cursorX;
       const y = frame.oy;
-      const h = 240;
+      const h = 360;
       items.push({
         kind: 'Gate',
         x, y, w: slotW, h,
@@ -321,17 +321,34 @@ function estimateBlockHeight(text: string, fontSize: number, widthPx: number): n
   return Math.ceil(lines * fontSize * 1.5) + 8;
 }
 
+const BLOCK_TAGS = new Set([
+  'div', 'p', 'section', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'ul', 'ol', 'li', 'pre', 'blockquote',
+]);
+
 function getChildBlocks(el: React.ReactElement<any>): React.ReactElement<any>[] {
   const out: React.ReactElement<any>[] = [];
   for (const c of React.Children.toArray((el.props as any)?.children)) {
     if (React.isValidElement(c)) {
       const t = (c as any).type;
-      if (typeof t === 'string' && (t === 'div' || t === 'p' || t === 'section')) {
+      if (typeof t === 'string' && BLOCK_TAGS.has(t)) {
         out.push(c as any);
       }
     }
   }
   return out;
+}
+
+function defaultFontSizeForTag(tag: string): number {
+  switch (tag) {
+    case 'h1': return 64;
+    case 'h2': return 48;
+    case 'h3': return 36;
+    case 'h4': return 28;
+    case 'h5': return 22;
+    case 'h6': return 18;
+    default: return 0;
+  }
 }
 
 function emitTextBlocks(
@@ -365,25 +382,79 @@ function emitTextBlocks(
   if (children.length <= 1) {
     const text = flatText((el.props as any)?.children).replace(/\s+/g, ' ').trim();
     if (text) {
-      items.push(buildTextBlock(text, innerX, innerY, innerW,
-        Math.max(frame.h - wrapperPad * 2, 30), parentStyle));
+      const fs = num(parentStyle?.fontSize) || 20;
+      const estH = estimateBlockHeight(text, fs, innerW);
+      const blockH = Math.max(frame.h - wrapperPad * 2, estH);
+      items.push(buildTextBlock(text, innerX, innerY, innerW, blockH, parentStyle));
     }
     return;
   }
 
+  // For flex-row containers, fold children into a single TextBlock per child
+  // but lay them out side-by-side instead of stacking vertically.
+  const isFlexRow = parentStyle?.display === 'flex'
+    && (parentStyle?.flexDirection === 'row' || parentStyle?.flexDirection == null);
+
   let cy = innerY;
+  let cx = innerX;
   const parentSansChrome = { ...parentStyle, background: undefined, border: undefined };
-  for (const child of children) {
+  const justifyEnd = parentStyle?.justifyContent === 'space-between'
+    || parentStyle?.justifyContent === 'flex-end';
+
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
     const cStyle = (child.props as any)?.style;
+    const tag = (child.type as string);
+    const innerBlocks = getChildBlocks(child);
+    if (innerBlocks.length >= 2) {
+      // child itself contains multiple block children → recurse so they split,
+      // otherwise flex-row entries with sub-structure get flattened.
+      const slotW = isFlexRow ? Math.floor(innerW / children.length) : innerW;
+      const slotX = isFlexRow
+        ? (justifyEnd && i === children.length - 1
+            ? innerX + innerW - slotW
+            : cx)
+        : innerX;
+      const slotY = isFlexRow ? innerY : cy;
+      const subFrame: Frame = {
+        ...frame, ox: slotX, oy: slotY,
+        w: slotW, h: Math.max(frame.h - (slotY - frame.oy), 40),
+      };
+      // Pass *only* the child's own style — inherited display:flex etc must
+      // not leak into a non-flex child container.
+      emitTextBlocks(child, subFrame, cStyle ?? {}, items);
+      if (isFlexRow) cx += slotW;
+      else cy += subFrame.h;
+      continue;
+    }
     const text = flatText((child.props as any)?.children).replace(/\s+/g, ' ').trim();
     if (!text) continue;
-    const fs = num(cStyle?.fontSize) || num(parentStyle?.fontSize) || 20;
+    const tagFS = defaultFontSizeForTag(tag);
+    const fs = num(cStyle?.fontSize) || tagFS || num(parentStyle?.fontSize) || 20;
     const mt = num(cStyle?.marginTop);
     const mb = num(cStyle?.marginBottom);
-    const h = estimateBlockHeight(text, fs, innerW);
-    items.push(buildTextBlock(text, innerX, cy + mt, innerW, h,
-      { ...parentSansChrome, ...cStyle }));
-    cy += mt + h + mb;
+    const tagBold = tag === 'h1' || tag === 'h2' || tag === 'h3'
+      || tag === 'h4' || tag === 'strong';
+
+    if (isFlexRow) {
+      const slotW = Math.floor(innerW / children.length);
+      const h = estimateBlockHeight(text, fs, slotW);
+      const slotX = justifyEnd && i === children.length - 1
+        ? innerX + innerW - slotW
+        : cx;
+      items.push(buildTextBlock(text, slotX, innerY, slotW, h, {
+        fontSize: fs, ...parentSansChrome, ...cStyle,
+        fontWeight: tagBold ? 700 : cStyle?.fontWeight,
+      }));
+      cx += slotW;
+    } else {
+      const h = estimateBlockHeight(text, fs, innerW);
+      items.push(buildTextBlock(text, innerX, cy + mt, innerW, h, {
+        fontSize: fs, ...parentSansChrome, ...cStyle,
+        fontWeight: tagBold ? 700 : cStyle?.fontWeight,
+      }));
+      cy += mt + h + mb;
+    }
   }
 }
 
