@@ -1,5 +1,9 @@
 # slide-to-pptx
 
+> A standalone `.pptx` exporter for [**open-slide**](https://github.com/1weiho/open-slide) by [@1weiho](https://github.com/1weiho).
+>
+> All credit for the underlying authoring framework, design language, and primitive vocabulary (`Box` / `Arrow` / `PageHeading` / `BitField` / …) belongs to the open-slide project — this tool only adds an exit ramp from that beautifully-designed surface into PowerPoint.
+
 Convert `open-slide` React decks into editable PowerPoint (`.pptx`) — native shapes, lines, and text frames, not rasterised images.
 
 ```
@@ -12,7 +16,7 @@ Every shape and text run that goes into the .pptx remains selectable, editable, 
 
 ## Why
 
-`open-slide` is a beautiful authoring surface — the declarative `Box` / `Arrow` / `PageHeading` / `BitField` / ... primitives map cleanly onto how engineers think about diagrams. But many corporate review workflows still demand `.pptx` deliverables (Teams, SharePoint, legal review, customer hand-off). This tool exists so you can keep authoring in React but ship `.pptx`.
+[open-slide](https://github.com/1weiho/open-slide) is a beautiful authoring surface — the declarative `Box` / `Arrow` / `PageHeading` / `BitField` / ... primitives map cleanly onto how engineers think about diagrams. But many corporate review workflows still demand `.pptx` deliverables (Teams, SharePoint, legal review, customer hand-off). This tool exists so you can keep authoring in React but ship `.pptx`.
 
 ## Install
 
@@ -106,8 +110,10 @@ Issues and PRs welcome. The smallest useful contribution: drop your own slide de
 
 Publishing to npm is automated: pushing a `v*.*.*` tag triggers `.github/workflows/publish.yml`, which runs `npm publish --access public` under the `@helping-ai-workflow` scope.
 
-## License
+## Credits & License
 
-MIT — see [LICENSE](./LICENSE).
+This project is an independent `.pptx` exporter built on top of [**open-slide**](https://github.com/1weiho/open-slide) by [@1weiho](https://github.com/1weiho). All the React primitives, the design tokens, and the slide authoring DX that make this tool useful come from that project. If you find this exporter helpful, please star [1weiho/open-slide](https://github.com/1weiho/open-slide) first.
 
-`open-slide` is the work of Yiwei. This project is an independent exporter, not affiliated with the open-slide maintainers.
+This project is not affiliated with or endorsed by the open-slide maintainers.
+
+Licensed under MIT — see [LICENSE](./LICENSE).
