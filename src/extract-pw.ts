@@ -16,6 +16,7 @@ export type PrimMeasure = {
 export type TextLeaf = {
   rect: Rect;
   text: string;
+  runs: { text: string; color: string; bold: boolean; italic: boolean; mono: boolean }[];
   fontSize: number;
   fontFamily: string;
   fontWeight: number;
@@ -116,6 +117,38 @@ const EXTRACT_SCRIPT = `(() => {
   const parsePx = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
   const INLINE_TAGS = new Set(['SPAN','EM','STRONG','B','I','A','CODE','SUP','SUB','MARK','U','SMALL','KBD','SAMP','VAR','BR','WBR','NOBR']);
+
+  const styleSig = (el) => {
+    const cs = getComputedStyle(el);
+    return {
+      color: colorRgbToHex(cs.color),
+      bold: parseInt(cs.fontWeight, 10) >= 600,
+      italic: cs.fontStyle === 'italic',
+      mono: (cs.fontFamily || '').toLowerCase().includes('mono')
+         || (cs.fontFamily || '').toLowerCase().includes('jetbrains')
+         || (cs.fontFamily || '').toLowerCase().includes('cascadia')
+         || (cs.fontFamily || '').toLowerCase().includes('consolas'),
+    };
+  };
+  const collectRuns = (el) => {
+    const own = styleSig(el);
+    const out = [];
+    for (const child of el.childNodes) {
+      if (child.nodeType === 3) {
+        const t = child.textContent;
+        if (t && t.length) out.push({ text: t, ...own });
+      } else if (child.nodeType === 1) {
+        if (INLINE_TAGS.has(child.tagName)) {
+          if (child.tagName === 'BR') {
+            out.push({ text: '\\n', ...own });
+          } else {
+            out.push(...collectRuns(child));
+          }
+        }
+      }
+    }
+    return out;
+  };
   const isInlineEl = (n) => n.nodeType === 1 && INLINE_TAGS.has(n.tagName);
 
   const texts = [];
@@ -150,6 +183,7 @@ const EXTRACT_SCRIPT = `(() => {
     texts.push({
       rect,
       text: trim(el.textContent),
+      runs: collectRuns(el),
       fontSize: parsePx(cs.fontSize),
       fontFamily: cs.fontFamily,
       fontWeight: parseInt(cs.fontWeight, 10) || 400,

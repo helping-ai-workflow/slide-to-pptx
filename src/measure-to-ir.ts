@@ -17,17 +17,20 @@ function pickFontFamily(family: string): 'mono' | 'body' | 'display' | undefined
 }
 
 function textLeafToRich(t: TextLeaf, id: string): IRRichText {
-  // Placeholder single-run conversion. Task 9 (B-3) replaces this with true per-span runs.
-  const run: Run = {
-    text: t.text,
-    color: t.color || '#1a1f2e',
-    bold: t.fontWeight >= 600,
-  };
+  const runs: Run[] = (t.runs && t.runs.length > 0)
+    ? t.runs.map((r) => ({
+        text: r.text,
+        color: r.color || t.color || '#1a1f2e',
+        bold: r.bold,
+        italic: r.italic,
+        mono: r.mono,
+      }))
+    : [{ text: t.text, color: t.color || '#1a1f2e', bold: t.fontWeight >= 600 }];
   return {
     kind: 'RichText',
     id,
     rect: r(t.rect),
-    runs: [run],
+    runs,
     fontSize: t.fontSize || 20,
     fontFamily: pickFontFamily(t.fontFamily),
     align: (t.textAlign === 'center' || t.textAlign === 'right' || t.textAlign === 'left')
