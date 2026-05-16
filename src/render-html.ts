@@ -96,7 +96,7 @@ export async function renderSlideHtml(slideDir: string): Promise<PageHtml[]> {
     let primitives: PrimRecord[] = [];
     try {
       const raw = React.createElement(PageFn);
-      const { tree, primitives: prims } = instrumentTree(raw, `pg${i}`);
+      const { tree, primitives: prims } = instrumentTree(raw, `pg${i}`, { skipRoot: true });
       primitives = prims;
       body = ReactDOMServer.renderToStaticMarkup(tree as any);
     } catch (e: any) {
