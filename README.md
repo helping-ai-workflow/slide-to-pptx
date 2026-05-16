@@ -2,7 +2,7 @@
 
 > A standalone `.pptx` exporter for [**open-slide**](https://github.com/1weiho/open-slide) by [@1weiho](https://github.com/1weiho).
 >
-> All credit for the underlying authoring framework, design language, and primitive vocabulary (`Box` / `Arrow` / `PageHeading` / `BitField` / …) belongs to the open-slide project — this tool only adds an exit ramp from that beautifully-designed surface into PowerPoint.
+> All credit for the underlying authoring framework, design language, and primitive vocabulary (Box, Arrow, PageHeading, BitField, and so on) belongs to the open-slide project — this tool only adds an exit ramp from that beautifully-designed surface into PowerPoint.
 
 Convert `open-slide` React decks into editable PowerPoint (`.pptx`) — native shapes, lines, and text frames, not rasterised images.
 
@@ -16,7 +16,7 @@ Every shape and text run that goes into the .pptx remains selectable, editable, 
 
 ## Why
 
-[open-slide](https://github.com/1weiho/open-slide) is a beautiful authoring surface — the declarative `Box` / `Arrow` / `PageHeading` / `BitField` / ... primitives map cleanly onto how engineers think about diagrams. But many corporate review workflows still demand `.pptx` deliverables (Teams, SharePoint, legal review, customer hand-off). This tool exists so you can keep authoring in React but ship `.pptx`.
+[open-slide](https://github.com/1weiho/open-slide) is a beautiful authoring surface — its declarative primitives (Box, Arrow, PageHeading, BitField, and many more) map cleanly onto how engineers think about diagrams. But many corporate review workflows still demand `.pptx` deliverables (Teams, SharePoint, legal review, customer hand-off). This tool exists so you can keep authoring in React but ship `.pptx`.
 
 ## Install
 
