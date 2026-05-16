@@ -34,17 +34,18 @@ npm install -g @helping-ai-workflow/slide-to-pptx
 ## Usage
 
 ```
-slide-to-pptx <slide-dir>                    # builds pptx/<basename>.pptx
-slide-to-pptx <slide-dir> --page Cover       # only one page → pptx/Cover.pptx
-slide-to-pptx <slide-dir> --out build        # custom output dir
+slide-to-pptx <slide-dir>                    # writes <basename>.pptx INTO <slide-dir>
+slide-to-pptx <slide-dir> --page Cover       # only one page → <slide-dir>/Cover.pptx
+slide-to-pptx <slide-dir> --out build        # write into ./build instead
 slide-to-pptx <slide-dir> --ir               # also emit IR JSON sidecars
 slide-to-pptx <slide-dir> --ir-only          # IR only, skip pptx
 slide-to-pptx <slide-dir> --html             # dump per-page HTML for debug
 slide-to-pptx --help
 ```
 
-Default: every page in `<slide-dir>` → one `pptx/<slide-dir-basename>.pptx` in the current
-working directory.
+Default: every page in `<slide-dir>` → one `<slide-dir>/<slide-dir-basename>.pptx`, dropped
+next to the slide source files. Override with `--out <dir>` if you'd rather keep build
+artifacts elsewhere.
 
 Playwright browser binaries are pulled in transitively; first run may take a moment while
 Chromium downloads.

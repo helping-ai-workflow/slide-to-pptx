@@ -11,11 +11,11 @@ function help() {
   console.error(`usage:
   slide-to-pptx <slide-dir> [options]
 
-  Builds <slide-dir-basename>.pptx into ./pptx/ by default.
+  Writes <slide-dir-basename>.pptx into <slide-dir> itself by default.
 
 options:
   --page <name>     only build the page whose function name matches <name>
-  --out <dir>       output directory (default: pptx)
+  --out <dir>       output directory (default: the slide dir)
   --ir              also write IR JSON sidecars next to the pptx
   --ir-only         write IR JSON only, skip pptx
   --html            dump per-page HTML for debugging, skip pptx
@@ -58,9 +58,10 @@ function parseArgs(argv: string[]): Opts | null {
 
   if (!slideArg) return null;
 
+  const slideDir = path.resolve(slideArg);
   return {
-    slideDir: path.resolve(slideArg),
-    outDir: path.resolve(outArg ?? 'pptx'),
+    slideDir,
+    outDir: outArg ? path.resolve(outArg) : slideDir,
     pageFilter,
     emitIR,
     irOnly,
