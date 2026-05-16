@@ -12,7 +12,7 @@
   ],
   "type": "module",
   "bin": {
-    "slide-to-pptx": "./bin/slide-to-pptx"
+    "slide-to-pptx": "./bin/slide-to-pptx.cjs"
   },
   "files": [
     "bin/",
