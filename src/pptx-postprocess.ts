@@ -9,6 +9,12 @@ const parser = new XMLParser({
   allowBooleanAttributes: true,
   preserveOrder: true,
   trimValues: false,
+  // Without these, fast-xml-parser auto-coerces tag/attribute text:
+  // <a:t>0xE6</a:t> would round-trip as <a:t>230</a:t> because
+  // "0xE6" parses as a hex number. We need every text node and
+  // attribute value preserved verbatim.
+  parseTagValue: false,
+  parseAttributeValue: false,
 });
 const builder = new XMLBuilder({
   ignoreAttributes: false,
