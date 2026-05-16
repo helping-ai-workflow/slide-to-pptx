@@ -23,16 +23,31 @@ Verified on `SystemDiagram` (9 Box + 7 Arrow + page chrome):
 * PageHeading / FooterRule / FooterLabel / PageNum rendered to chrome
 * CJK text preserved (`IP 在 MAC Top 中的位置`)
 
-## Run the spike
+## Install
+
+Published on npm as `@helping-ai-workflow/slide-to-pptx`.
+
+```
+npm install -g @helping-ai-workflow/slide-to-pptx
+slide-to-pptx spike <slide-dir>          # builds out/<Page>.pptx
+slide-to-pptx spike <slide-dir> --page Cover
+```
+
+Per-project install:
+
+```
+npm install --save-dev @helping-ai-workflow/slide-to-pptx
+npx slide-to-pptx spike <slide-dir>
+```
+
+Playwright browser binaries are pulled in transitively; first run may take a moment while
+Chromium downloads.
+
+## Run from source (this repo)
 
 ```
 npm install
 npm run spike     # builds out/SystemDiagram.pptx from ../my-slide/slides/mac-merge-tx-spec
-```
-
-`--page <name>` selects a different page by function name:
-
-```
 npm run spike -- --page Cover
 ```
 
