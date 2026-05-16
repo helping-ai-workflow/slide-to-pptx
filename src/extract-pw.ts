@@ -229,19 +229,11 @@ const EXTRACT_SCRIPT = `(() => {
   for (const el of all) {
     if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
     if (INLINE_TAGS.has(el.tagName)) continue;
+    if (el.closest('svg')) continue;
 
-    // skip if this element is itself emitted as a text leaf (has own text)
-    let hasOwnText = false;
-    let hasBlockChild = false;
-    for (const c of el.childNodes) {
-      if (c.nodeType === 3 && c.textContent && c.textContent.trim()) hasOwnText = true;
-      else if (c.nodeType === 1) {
-        if (!isInlineEl(c)) hasBlockChild = true;
-        else if (c.textContent && c.textContent.trim()) hasOwnText = true;
-      }
-    }
-    if (hasOwnText && !hasBlockChild) continue;
-
+    // An element with bg/border is emitted as a decor box even if it also
+    // carries text — the corresponding text leaf is emitted separately by
+    // the texts collector and will paint on top of this decor.
     const cs = getComputedStyle(el);
     const bg = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? colorRgbToHex(cs.backgroundColor) : '';
     const hasBorder = cs.borderTopWidth !== '0px';

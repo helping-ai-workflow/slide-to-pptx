@@ -151,13 +151,9 @@ export function measureToIR(m: PageMeasure): IRPage {
     groupById.set(p.id, g);
   }
 
-  // 2) Place groups under their parent (or root).
-  for (const p of m.primitives) {
-    const g = groupById.get(p.id)!;
-    push(p.parentId, g);
-  }
-
-  // 3) Decor → either inside its group or at root.
+  // 2) Decor FIRST — pushed before groups so they end up at the BACK of the
+  //    z-stack in every bucket. Otherwise an outer card's white panel would
+  //    paint on top of the BitField groups it contains and hide them.
   let decorN = 0;
   for (const d of m.decors) {
     if (d.rect.w * d.rect.h > CANVAS_AREA * 0.9) continue;
@@ -172,6 +168,13 @@ export function measureToIR(m: PageMeasure): IRPage {
       boxShadow: d.boxShadow || undefined,
     };
     push(d.groupId, decor);
+  }
+
+  // 3) Place groups under their parent — drawn on top of any decor that
+  //    shares the same bucket.
+  for (const p of m.primitives) {
+    const g = groupById.get(p.id)!;
+    push(p.parentId, g);
   }
 
   // 4) Images.
