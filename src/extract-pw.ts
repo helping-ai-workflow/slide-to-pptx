@@ -121,10 +121,8 @@ const EXTRACT_SCRIPT = `(() => {
   const texts = [];
   const all = document.querySelectorAll('body *');
   for (const el of all) {
-    if (inPrim.has(el)) continue;
     if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
     if (INLINE_TAGS.has(el.tagName)) continue; // inline children are folded into parent
-    if (el.closest('[data-prim-id]')) continue;
 
     // Children-by-type check
     let hasOwnText = false;
@@ -174,10 +172,8 @@ const EXTRACT_SCRIPT = `(() => {
   // Captures card chrome (the wrapper <div> around card content).
   const decors = [];
   for (const el of all) {
-    if (inPrim.has(el)) continue;
     if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
     if (INLINE_TAGS.has(el.tagName)) continue;
-    if (el.closest('[data-prim-id]')) continue;
 
     // skip if this element is itself emitted as a text leaf (has own text)
     let hasOwnText = false;
