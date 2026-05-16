@@ -1,15 +1,28 @@
 {
-  "name": "slide-to-pptx",
+  "name": "@helping-ai-workflow/slide-to-pptx",
   "version": "0.1.1",
-  "private": true,
+  "description": "Render React/HTML slide decks to PowerPoint (.pptx) via Playwright + pptxgenjs",
+  "keywords": [
+    "pptx",
+    "powerpoint",
+    "slides",
+    "react",
+    "playwright",
+    "pptxgenjs"
+  ],
   "type": "module",
   "bin": {
     "slide-to-pptx": "./bin/slide-to-pptx"
   },
-  "scripts": {
-    "extract": "tsx src/cli.ts extract",
-    "build-pptx": "tsx src/cli.ts build",
-    "spike": "tsx src/cli.ts spike ../my-slide/slides/mac-merge-tx-spec"
+  "files": [
+    "bin/",
+    "src/",
+    "tsconfig.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@types/react-dom": "^18.3.7",
@@ -19,12 +32,29 @@
     "playwright": "^1.60.0",
     "pptxgenjs": "^3.12.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
-    "tsx": "^4.19.2",
     "typescript": "^5.6.3"
+  },
+  "scripts": {
+    "extract": "tsx src/cli.ts extract",
+    "build-pptx": "tsx src/cli.ts build",
+    "spike": "tsx src/cli.ts spike ../my-slide/slides/mac-merge-tx-spec",
+    "test": "node -e \"console.log('no tests yet')\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/helping-ai-workflow/slide-to-pptx.git"
+  },
+  "homepage": "https://github.com/helping-ai-workflow/slide-to-pptx#readme",
+  "bugs": "https://github.com/helping-ai-workflow/slide-to-pptx/issues",
+  "author": "helping-ai-workflow",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
   }
 }
