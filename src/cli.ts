@@ -1,3 +1,4 @@
+import './env.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { renderSlideHtml } from './render-html.js';
