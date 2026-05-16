@@ -2,10 +2,10 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { renderSlideHtml } from './render-html.js';
 import { measureSlide } from './extract-pw.js';
-import { measureToIRv2 } from './measure-to-ir.js';
-import { buildPptxV2 } from './pptx-build.js';
+import { measureToIR } from './measure-to-ir.js';
+import { buildPptx } from './pptx-build.js';
 import { postprocessPptx } from './pptx-postprocess.js';
-import type { IRPageV2 } from './types.js';
+import type { IRPage } from './types.js';
 
 function help() {
   console.error(`usage:
@@ -49,7 +49,7 @@ async function main() {
   }
 
   const measures = await measureSlide(selected);
-  const pages: IRPageV2[] = measures.map(measureToIRv2);
+  const pages: IRPage[] = measures.map(measureToIR);
 
   for (const p of pages) {
     const irPath = path.join(outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
@@ -64,15 +64,15 @@ async function main() {
     ? `${pages[0].pageName}.pptx`
     : `${path.basename(slideDir)}.pptx`;
   const pptxPath = path.join(outDir, pptxName);
-  await buildPptxV2(pages, pptxPath, slideDir);
+  await buildPptx(pages, pptxPath, slideDir);
   await postprocessPptx(pptxPath);
   console.log(`PPTX written: ${pptxPath}`);
 }
 
-function printCoverage(pages: IRPageV2[]) {
+function printCoverage(pages: IRPage[]) {
   for (const p of pages) {
     const counts: Record<string, number> = {};
-    const walk = (items: IRPageV2['items']) => {
+    const walk = (items: IRPage['items']) => {
       for (const it of items) {
         counts[it.kind] = (counts[it.kind] ?? 0) + 1;
         if (it.kind === 'Group') walk(it.children);
