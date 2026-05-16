@@ -43,11 +43,26 @@ function parseArgs(argv: string[]): Opts | null {
   let htmlOnly = false;
   let quiet = false;
 
+  const takeValue = (flag: string, i: number): string | null => {
+    const next = argv[i + 1];
+    if (next === undefined || next.startsWith('-')) {
+      console.error(`option ${flag} requires a value`);
+      return null;
+    }
+    return next;
+  };
+
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') return null;
-    if (a === '--page') { pageFilter = argv[++i]; continue; }
-    if (a === '--out')  { outArg     = argv[++i]; continue; }
+    if (a === '--page') {
+      const v = takeValue('--page', i); if (v === null) return null;
+      pageFilter = v; i++; continue;
+    }
+    if (a === '--out') {
+      const v = takeValue('--out', i); if (v === null) return null;
+      outArg = v; i++; continue;
+    }
     if (a === '--ir')        { emitIR = true; continue; }
     if (a === '--ir-only')   { irOnly = true; continue; }
     if (a === '--html')      { htmlOnly = true; continue; }
@@ -75,6 +90,14 @@ function parseArgs(argv: string[]): Opts | null {
   };
 }
 
+// Page / file basenames flow into path.join — strip anything that would
+// either escape the output directory (path separators, leading dots) or
+// produce a name the host filesystem refuses to write. Whitelist word
+// chars, dots, and hyphens; collapse runs of replacements.
+function safeName(s: string): string {
+  return s.replace(/[^\w.-]+/g, '_').replace(/^\.+/, '_').slice(0, 120) || '_';
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts) { help(); process.exit(1); }
@@ -86,7 +109,7 @@ async function main() {
   if (opts.htmlOnly) {
     const allHtml = await renderSlideHtml(opts.slideDir);
     for (const p of allHtml) {
-      const hp = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.html`);
+      const hp = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${safeName(p.pageName)}.html`);
       await writeFile(hp, p.html, 'utf8');
     }
     info(`HTML written: ${allHtml.length} page(s) → ${opts.outDir}`);
@@ -107,7 +130,7 @@ async function main() {
 
   if (opts.emitIR || opts.irOnly) {
     for (const p of pages) {
-      const irPath = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
+      const irPath = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${safeName(p.pageName)}.ir.json`);
       await writeFile(irPath, JSON.stringify(p, null, 2), 'utf8');
     }
     info(`IR written: ${pages.length} page(s) → ${opts.outDir}`);
@@ -117,8 +140,8 @@ async function main() {
   if (opts.irOnly) return;
 
   const pptxName = opts.pageFilter
-    ? `${pages[0].pageName}.pptx`
-    : `${path.basename(opts.slideDir)}.pptx`;
+    ? `${safeName(pages[0].pageName)}.pptx`
+    : `${safeName(path.basename(opts.slideDir))}.pptx`;
   const pptxPath = path.join(opts.outDir, pptxName);
   await buildPptx(pages, pptxPath, opts.slideDir);
   await postprocessPptx(pptxPath);

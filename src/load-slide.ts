@@ -1,5 +1,5 @@
 import { build, type Plugin } from 'esbuild';
-import { writeFile, mkdtemp, mkdir } from 'node:fs/promises';
+import { writeFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -60,6 +60,12 @@ export async function loadSlideModule(slideDir: string): Promise<SlideModule> {
   const dir = await mkdtemp(path.join(CACHE_ROOT, 'slide-bundle-'));
   const bundlePath = path.join(dir, 'slide.mjs');
   await writeFile(bundlePath, code, 'utf8');
-  const mod = (await import(pathToFileURL(bundlePath).href)) as SlideModule;
-  return mod;
+  try {
+    // Node caches the module in memory after import, so the bundle file
+    // is safe to delete immediately. This keeps .cache/ from accumulating
+    // a slide-bundle-XXXXXX directory per CLI invocation.
+    return (await import(pathToFileURL(bundlePath).href)) as SlideModule;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
