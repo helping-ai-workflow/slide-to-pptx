@@ -10,6 +10,7 @@ export type PrimMeasure = {
   rect: Rect;
   svgOffset: { x: number; y: number } | null;
   props: Record<string, any>;
+  parentId: string | null;    // NEW — closest enclosing primitive id
 };
 
 export type TextLeaf = {
@@ -24,12 +25,14 @@ export type TextLeaf = {
   borderRadius: number;
   textAlign: string;
   padding: { t: number; r: number; b: number; l: number };
+  groupId: string | null;     // NEW
 };
 
 export type ImageLeaf = {
   rect: Rect;
   src: string;
   alt?: string;
+  groupId: string | null;     // NEW
 };
 
 export type DecorBox = {
@@ -38,6 +41,7 @@ export type DecorBox = {
   borderColor?: string;
   borderWidth: number;
   borderRadius: number;
+  groupId: string | null;     // NEW
 };
 
 export type PageMeasure = {
@@ -64,6 +68,7 @@ const EXTRACT_SCRIPT = `(() => {
       name: el.getAttribute('data-prim-name'),
       rect: pickRect(el),
       svgOffset: svgRect ? { x: svgRect.left, y: svgRect.top } : null,
+      parentId: el.parentElement?.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     };
   });
 
@@ -82,7 +87,12 @@ const EXTRACT_SCRIPT = `(() => {
     // shrinking inside a 540x700 panel still fills the panel in pptx.
     const wrapper = img.parentElement;
     const rect = wrapper ? pickRect(wrapper) : pickRect(img);
-    images.push({ rect, src: img.getAttribute('src') || '', alt: img.getAttribute('alt') || '' });
+    images.push({
+      rect,
+      src: img.getAttribute('src') || '',
+      alt: img.getAttribute('alt') || '',
+      groupId: img.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
+    });
   }
 
   const trim = (s) => (s || '').replace(/\\s+/g, ' ').trim();
@@ -156,6 +166,7 @@ const EXTRACT_SCRIPT = `(() => {
         b: parsePx(cs.paddingBottom),
         l: parsePx(cs.paddingLeft),
       },
+      groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
 
@@ -194,6 +205,7 @@ const EXTRACT_SCRIPT = `(() => {
       borderColor: hasBorder ? colorRgbToHex(cs.borderTopColor) : '',
       borderWidth: bw,
       borderRadius: parsePx(cs.borderTopLeftRadius),
+      groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
 
@@ -223,6 +235,7 @@ export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
           rect: entry.rect,
           svgOffset: entry.svgOffset,
           props: rec?.props ?? {},
+          parentId: entry.parentId,
         } as PrimMeasure;
       });
       out.push({ pageIndex: p.pageIndex, pageName: p.pageName, primitives, texts: r.texts, images: r.images, decors: r.decors });
