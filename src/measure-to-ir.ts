@@ -26,9 +26,7 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
         fill: s.fill || undefined,
         stroke: s.stroke || undefined,
         strokeWidth: s.strokeWidth,
-        rectRadius: (s.rx ?? 0) > 0
-          ? Math.min(0.5, (s.rx as number) / Math.min(s.rect.w, s.rect.h))
-          : undefined,
+        rectRadius: (s.rx ?? 0) > 0 ? (s.rx as number) : undefined,
       } as IRShape];
     case 'circle':
     case 'ellipse':

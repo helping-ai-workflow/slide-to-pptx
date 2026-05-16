@@ -54,6 +54,7 @@ function htmlShell(body: string, designCss: string): string {
 <meta charset="utf-8" />
 <style>
 :root { ${designCss} }
+*, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
   width: 1920px; height: 1080px;

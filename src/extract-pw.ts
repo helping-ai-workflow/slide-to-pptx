@@ -225,28 +225,41 @@ const EXTRACT_SCRIPT = `(() => {
 
   // Decor boxes: elements with background/border that DO NOT have direct text.
   // Captures card chrome (the wrapper <div> around card content).
+  // Border handling: when all 4 sides match, emit as one decor with that
+  // border. When sides differ (e.g. only border-bottom for a table-row
+  // separator), emit decor with no border + a synthetic line per non-zero
+  // side — otherwise the row-separator hair-lines disappear entirely.
   const decors = [];
+  const borderLines = [];
   for (const el of all) {
     if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
     if (INLINE_TAGS.has(el.tagName)) continue;
     if (el.closest('svg')) continue;
 
-    // An element with bg/border is emitted as a decor box even if it also
-    // carries text — the corresponding text leaf is emitted separately by
-    // the texts collector and will paint on top of this decor.
     const cs = getComputedStyle(el);
     const bg = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? colorRgbToHex(cs.backgroundColor) : '';
-    const hasBorder = cs.borderTopWidth !== '0px';
-    const bw = parsePx(cs.borderTopWidth);
-    if (!bg && !hasBorder) continue;
+    const sides = {
+      t: { w: parsePx(cs.borderTopWidth), c: cs.borderTopColor },
+      r: { w: parsePx(cs.borderRightWidth), c: cs.borderRightColor },
+      b: { w: parsePx(cs.borderBottomWidth), c: cs.borderBottomColor },
+      l: { w: parsePx(cs.borderLeftWidth), c: cs.borderLeftColor },
+    };
+    const anyBorder = sides.t.w > 0 || sides.r.w > 0 || sides.b.w > 0 || sides.l.w > 0;
+    if (!bg && !anyBorder) continue;
 
     const rect = pickRect(el);
     if (rect.w <= 0 || rect.h <= 0) continue;
+    const groupId = el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null;
+
+    const uniform = anyBorder
+      && sides.t.w === sides.r.w && sides.t.w === sides.b.w && sides.t.w === sides.l.w
+      && sides.t.c === sides.r.c && sides.t.c === sides.b.c && sides.t.c === sides.l.c;
+
     decors.push({
       rect,
       background: bg || '',
-      borderColor: hasBorder ? colorRgbToHex(cs.borderTopColor) : '',
-      borderWidth: bw,
+      borderColor: uniform ? colorRgbToHex(sides.t.c) : '',
+      borderWidth: uniform ? sides.t.w : 0,
       borderRadii: [
         parsePx(cs.borderTopLeftRadius),
         parsePx(cs.borderTopRightRadius),
@@ -265,24 +278,156 @@ const EXTRACT_SCRIPT = `(() => {
           color: colorMatch ? colorRgbToHex(colorMatch[0]) : '#000000',
         };
       })(),
-      groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
+      groupId,
     });
+
+    if (anyBorder && !uniform) {
+      // Emit each non-zero side as a synthetic line shape so non-uniform
+      // borders survive (table row separators, single-side accents, etc).
+      const pushLine = (x1, y1, x2, y2, w, c) => {
+        borderLines.push({
+          tag: 'line',
+          rect: {
+            x: Math.min(x1, x2), y: Math.min(y1, y2),
+            w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+          },
+          fill: '', stroke: colorRgbToHex(c), strokeWidth: w, dashed: false,
+          rx: 0, x1, y1, x2, y2, points: '',
+          markerEnd: '',
+          text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+          groupId,
+        });
+      };
+      if (sides.t.w > 0) pushLine(rect.x, rect.y, rect.x + rect.w, rect.y, sides.t.w, sides.t.c);
+      if (sides.r.w > 0) pushLine(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + rect.h, sides.r.w, sides.r.c);
+      if (sides.b.w > 0) pushLine(rect.x, rect.y + rect.h, rect.x + rect.w, rect.y + rect.h, sides.b.w, sides.b.c);
+      if (sides.l.w > 0) pushLine(rect.x, rect.y, rect.x, rect.y + rect.h, sides.l.w, sides.l.c);
+    }
   }
 
+  // Parse an SVG <path d="..."> into screen-space line segments.
+  // Supports M/L/H/V/C/Q/Z (abs + rel). S/T/A skipped — uncommon for our decks.
+  const parsePathD = (d, svgLeft, svgTop) => {
+    const toks = d.match(/[a-zA-Z]|[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?/g) || [];
+    let i = 0;
+    const num = () => parseFloat(toks[i++]);
+    const isCmd = (t) => /^[a-zA-Z]$/.test(t);
+    const segs = [];
+    let cx = 0, cy = 0, sx = 0, sy = 0;
+    let cmd = '';
+    const push = (x1, y1, x2, y2) => segs.push({
+      x1: x1 + svgLeft, y1: y1 + svgTop, x2: x2 + svgLeft, y2: y2 + svgTop,
+    });
+    while (i < toks.length) {
+      if (isCmd(toks[i])) cmd = toks[i++];
+      const rel = cmd === cmd.toLowerCase();
+      const c = cmd.toUpperCase();
+      if (c === 'M') {
+        let x = num(), y = num();
+        if (rel) { x += cx; y += cy; }
+        cx = x; cy = y; sx = x; sy = y;
+        cmd = rel ? 'l' : 'L';
+        continue;
+      }
+      if (c === 'L') {
+        let x = num(), y = num();
+        if (rel) { x += cx; y += cy; }
+        push(cx, cy, x, y); cx = x; cy = y; continue;
+      }
+      if (c === 'H') {
+        let x = num();
+        if (rel) x += cx;
+        push(cx, cy, x, cy); cx = x; continue;
+      }
+      if (c === 'V') {
+        let y = num();
+        if (rel) y += cy;
+        push(cx, cy, cx, y); cy = y; continue;
+      }
+      if (c === 'C') {
+        let c1x = num(), c1y = num(), c2x = num(), c2y = num(), ex = num(), ey = num();
+        if (rel) { c1x += cx; c1y += cy; c2x += cx; c2y += cy; ex += cx; ey += cy; }
+        const N = 16;
+        let px = cx, py = cy;
+        for (let k = 1; k <= N; k++) {
+          const t = k / N, it = 1 - t;
+          const bx = it*it*it*cx + 3*it*it*t*c1x + 3*it*t*t*c2x + t*t*t*ex;
+          const by = it*it*it*cy + 3*it*it*t*c1y + 3*it*t*t*c2y + t*t*t*ey;
+          push(px, py, bx, by); px = bx; py = by;
+        }
+        cx = ex; cy = ey; continue;
+      }
+      if (c === 'Q') {
+        let cpx = num(), cpy = num(), ex = num(), ey = num();
+        if (rel) { cpx += cx; cpy += cy; ex += cx; ey += cy; }
+        const N = 12;
+        let px = cx, py = cy;
+        for (let k = 1; k <= N; k++) {
+          const t = k / N, it = 1 - t;
+          const bx = it*it*cx + 2*it*t*cpx + t*t*ex;
+          const by = it*it*cy + 2*it*t*cpy + t*t*ey;
+          push(px, py, bx, by); px = bx; py = by;
+        }
+        cx = ex; cy = ey; continue;
+      }
+      if (c === 'Z') {
+        push(cx, cy, sx, sy); cx = sx; cy = sy; continue;
+      }
+      break;
+    }
+    return segs;
+  };
+
   const svgShapes = [];
-  const SVG_TAGS = new Set(['rect','line','polyline','circle','ellipse','text']);
+  const SVG_TAGS = new Set(['rect','line','polyline','circle','ellipse','text','path']);
   for (const el of document.querySelectorAll('svg *')) {
-    if (!SVG_TAGS.has(el.tagName.toLowerCase())) continue;
+    const tag = el.tagName.toLowerCase();
+    if (!SVG_TAGS.has(tag)) continue;
+    // <marker>/<defs> children are rendered indirectly via url(#id); their
+    // own bbox is zero and would otherwise pollute the output.
+    if (el.closest('marker, defs')) continue;
     const cs = getComputedStyle(el);
+    if (tag === 'path') {
+      const d = el.getAttribute('d') || '';
+      if (!d.trim()) continue;
+      const svgEl = el.closest('svg');
+      if (!svgEl) continue;
+      const svgRect = svgEl.getBoundingClientRect();
+      const segs = parsePathD(d, svgRect.left, svgRect.top);
+      if (segs.length === 0) continue;
+      const stroke = cs.stroke && cs.stroke !== 'none' ? colorRgbToHex(cs.stroke) : '';
+      const sw = parsePx(cs.strokeWidth);
+      const dashed = !!cs.strokeDasharray && cs.strokeDasharray !== 'none';
+      const me = el.getAttribute('marker-end') || '';
+      const gid = el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null;
+      for (let k = 0; k < segs.length; k++) {
+        const s = segs[k];
+        svgShapes.push({
+          tag: 'line',
+          rect: {
+            x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2),
+            w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1),
+          },
+          fill: '', stroke, strokeWidth: sw, dashed,
+          rx: 0,
+          x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2,
+          points: '',
+          markerEnd: k === segs.length - 1 ? me : '',
+          text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+          groupId: gid,
+        });
+      }
+      continue;
+    }
     const rect = pickRect(el);
-    if (rect.w <= 0 && el.tagName.toLowerCase() !== 'line') continue;
-    if (rect.h <= 0 && el.tagName.toLowerCase() !== 'line') continue;
+    if (rect.w <= 0 && tag !== 'line') continue;
+    if (rect.h <= 0 && tag !== 'line') continue;
     const x1 = parseFloat(el.getAttribute('x1') || '0');
     const y1 = parseFloat(el.getAttribute('y1') || '0');
     const x2 = parseFloat(el.getAttribute('x2') || '0');
     const y2 = parseFloat(el.getAttribute('y2') || '0');
     let lineEndpoints = null;
-    if (el.tagName.toLowerCase() === 'line') {
+    if (tag === 'line') {
       const svgEl = el.closest('svg');
       if (svgEl) {
         const svgRect = svgEl.getBoundingClientRect();
@@ -293,7 +438,7 @@ const EXTRACT_SCRIPT = `(() => {
       }
     }
     svgShapes.push({
-      tag: el.tagName.toLowerCase(),
+      tag,
       rect,
       fill: cs.fill && cs.fill !== 'none' ? colorRgbToHex(cs.fill) : '',
       stroke: cs.stroke && cs.stroke !== 'none' ? colorRgbToHex(cs.stroke) : '',
@@ -306,13 +451,17 @@ const EXTRACT_SCRIPT = `(() => {
       y2: lineEndpoints?.sy2 ?? y2,
       points: el.getAttribute('points') || '',
       markerEnd: el.getAttribute('marker-end') || '',
-      text: el.tagName.toLowerCase() === 'text' ? (el.textContent || '').trim() : '',
+      text: tag === 'text' ? (el.textContent || '').trim() : '',
       fontSize: parsePx(cs.fontSize),
       fontFamily: cs.fontFamily || '',
       textAnchor: el.getAttribute('text-anchor') || 'start',
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
+
+  // Border-edge lines from HTML decor extraction join the SVG shape stream
+  // so they go through the same downstream "shape" handling.
+  for (const bl of borderLines) svgShapes.push(bl);
 
   return { primitives, texts, images, decors, svgShapes };
 })()`;

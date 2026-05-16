@@ -79,8 +79,12 @@ function renderShape(
   groupChain: string[] | null,
 ) {
   const x = px(it.rect.x), y = py(it.rect.y);
-  const w = Math.max(px(it.rect.w), 0.01);
-  const h = Math.max(py(it.rect.h), 0.01);
+  // For closed shapes a zero side collapses the geometry, so clamp to a
+  // hairline. For a line, h=0 (horizontal) and w=0 (vertical) are valid
+  // — clamping them tilts the line by ~1.4px which is highly visible.
+  const isLine = it.shape === 'line';
+  const w = isLine ? px(it.rect.w) : Math.max(px(it.rect.w), 0.01);
+  const h = isLine ? py(it.rect.h) : Math.max(py(it.rect.h), 0.01);
   const common = {
     x, y, w, h,
     fill: it.fill ? { color: hex(it.fill) } : { type: 'none' as const },
@@ -89,7 +93,7 @@ function renderShape(
       : { type: 'none' as const },
     objectName: nameFor(groupChain, it.id),
   } as any;
-  if (it.shape === 'line') {
+  if (isLine) {
     slide.addShape('line', {
       ...common,
       line: {
@@ -99,7 +103,12 @@ function renderShape(
       flipH: it.flipH, flipV: it.flipV,
     });
   } else if (it.shape === 'roundRect') {
-    slide.addShape('roundRect', { ...common, rectRadius: it.rectRadius ?? 0.05 });
+    // pptxgenjs treats `rectRadius` as inches of corner radius (despite docs
+    // calling it a fraction). Convert canvas-px → inches and cap at half the
+    // shorter side so the corner stays a quarter-circle, never overflowing
+    // into a pill on small boxes.
+    const radiusPx = Math.min(it.rectRadius ?? 4, Math.min(it.rect.w, it.rect.h) / 2);
+    slide.addShape('roundRect', { ...common, rectRadius: px(radiusPx) });
   } else if (it.shape === 'ellipse') {
     slide.addShape('ellipse', common);
   } else {
@@ -117,9 +126,11 @@ function renderDecor(
   const h = Math.max(py(it.rect.h), 0.05);
   const maxR = Math.max(...it.borderRadii);
   const useRound = maxR > 0;
+  // See renderShape — `rectRadius` is in inches, not a fraction.
+  const radiusPx = Math.min(maxR, Math.min(it.rect.w, it.rect.h) / 2);
   slide.addShape(useRound ? 'roundRect' : 'rect', {
     x, y, w, h,
-    rectRadius: useRound ? Math.min(0.5, maxR / Math.min(it.rect.w, it.rect.h)) : 0,
+    rectRadius: useRound ? px(radiusPx) : 0,
     fill: it.background
       ? { color: hex(it.background) }
       : { color: 'FFFFFF', transparency: 100 },
