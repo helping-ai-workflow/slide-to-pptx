@@ -19,6 +19,7 @@ options:
   --ir              also write IR JSON sidecars next to the pptx
   --ir-only         write IR JSON only, skip pptx
   --html            dump per-page HTML for debugging, skip pptx
+  -q, --quiet       suppress progress output (errors still go to stderr)
   -h, --help        show this help`);
 }
 
@@ -29,6 +30,7 @@ type Opts = {
   emitIR: boolean;
   irOnly: boolean;
   htmlOnly: boolean;
+  quiet: boolean;
 };
 
 function parseArgs(argv: string[]): Opts | null {
@@ -38,6 +40,7 @@ function parseArgs(argv: string[]): Opts | null {
   let emitIR = false;
   let irOnly = false;
   let htmlOnly = false;
+  let quiet = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -47,7 +50,8 @@ function parseArgs(argv: string[]): Opts | null {
     if (a === '--ir')        { emitIR = true; continue; }
     if (a === '--ir-only')   { irOnly = true; continue; }
     if (a === '--html')      { htmlOnly = true; continue; }
-    if (a.startsWith('--')) {
+    if (a === '-q' || a === '--quiet') { quiet = true; continue; }
+    if (a.startsWith('-')) {
       console.error(`unknown option: ${a}`);
       return null;
     }
@@ -66,12 +70,15 @@ function parseArgs(argv: string[]): Opts | null {
     emitIR,
     irOnly,
     htmlOnly,
+    quiet,
   };
 }
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts) { help(); process.exit(1); }
+
+  const info = opts.quiet ? () => {} : (msg: string) => console.log(msg);
 
   await mkdir(opts.outDir, { recursive: true });
 
@@ -81,7 +88,7 @@ async function main() {
       const hp = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.html`);
       await writeFile(hp, p.html, 'utf8');
     }
-    console.log(`HTML written: ${allHtml.length} page(s) → ${opts.outDir}`);
+    info(`HTML written: ${allHtml.length} page(s) → ${opts.outDir}`);
     return;
   }
 
@@ -102,9 +109,9 @@ async function main() {
       const irPath = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
       await writeFile(irPath, JSON.stringify(p, null, 2), 'utf8');
     }
-    console.log(`IR written: ${pages.length} page(s) → ${opts.outDir}`);
+    info(`IR written: ${pages.length} page(s) → ${opts.outDir}`);
   }
-  printCoverage(pages);
+  if (!opts.quiet) printCoverage(pages);
 
   if (opts.irOnly) return;
 
@@ -114,7 +121,7 @@ async function main() {
   const pptxPath = path.join(opts.outDir, pptxName);
   await buildPptx(pages, pptxPath, opts.slideDir);
   await postprocessPptx(pptxPath);
-  console.log(`PPTX written: ${pptxPath}`);
+  info(`PPTX written: ${pptxPath}`);
 }
 
 function printCoverage(pages: IRPage[]) {

@@ -40,6 +40,7 @@ slide-to-pptx <slide-dir> --out build        # write into ./build instead
 slide-to-pptx <slide-dir> --ir               # also emit IR JSON sidecars
 slide-to-pptx <slide-dir> --ir-only          # IR only, skip pptx
 slide-to-pptx <slide-dir> --html             # dump per-page HTML for debug
+slide-to-pptx <slide-dir> --quiet            # suppress progress output (-q)
 slide-to-pptx --help
 ```
 
