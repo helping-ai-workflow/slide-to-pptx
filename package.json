@@ -1,10 +1,10 @@
 {
   "name": "slide-to-pptx",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "bin": {
-    "slide-to-pptx": "./dist/cli.js"
+    "slide-to-pptx": "./bin/slide-to-pptx"
   },
   "scripts": {
     "extract": "tsx src/cli.ts extract",

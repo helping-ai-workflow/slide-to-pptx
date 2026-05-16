@@ -1,0 +1,8 @@
+#!/bin/sh
+# slide-to-pptx CLI wrapper.
+# Resolves the bundled tsx and runs src/cli.ts so users can invoke the
+# tool by name once `npm link` (or `npm install -g .`) has been run.
+# `readlink -f` follows symlinks so npm-link installs work.
+SCRIPT="$(readlink -f "$0")"
+DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+exec "$DIR/node_modules/.bin/tsx" "$DIR/src/cli.ts" "$@"
