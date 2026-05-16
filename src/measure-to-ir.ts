@@ -70,10 +70,23 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
       }
       return out;
     }
-    case 'text':
+    case 'text': {
+      // Chromium's <text> bbox is tight; PowerPoint's mono fallback (Cascadia
+      // for JetBrains Mono) renders ~10–20% wider. Pad generously and shift
+      // anchor so the visual stays centered/right where source intended.
+      const padW = Math.max(40, s.fontSize * 2);
+      const padH = Math.max(8, s.fontSize * 0.5);
+      const isCenter = s.textAnchor === 'middle';
+      const isRight = s.textAnchor === 'end';
+      const dx = isCenter ? padW / 2 : isRight ? padW : 0;
       return [{
         kind: 'RichText', id,
-        rect: r(s.rect),
+        rect: {
+          x: s.rect.x - dx,
+          y: s.rect.y,
+          w: s.rect.w + padW,
+          h: s.rect.h + padH,
+        },
         runs: [{
           text: s.text,
           color: s.fill || '#1a1f2e',
@@ -84,11 +97,10 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
           || s.fontFamily.toLowerCase().includes('cascadia')
           || s.fontFamily.toLowerCase().includes('consolas')
           ? 'mono' : 'body',
-        align: s.textAnchor === 'middle' ? 'center'
-            : s.textAnchor === 'end' ? 'right'
-            : 'left',
+        align: isCenter ? 'center' : isRight ? 'right' : 'left',
         valign: 'top',
       } as IRRichText];
+    }
     default:
       return [];
   }
