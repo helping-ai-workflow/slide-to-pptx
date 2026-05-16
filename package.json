@@ -1,6 +1,6 @@
 {
   "name": "@helping-ai-workflow/slide-to-pptx",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Render React/HTML slide decks to PowerPoint (.pptx) via Playwright + pptxgenjs",
   "keywords": [
     "pptx",
