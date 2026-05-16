@@ -41,7 +41,8 @@ export type DecorBox = {
   background?: string;
   borderColor?: string;
   borderWidth: number;
-  borderRadius: number;
+  borderRadii: [number, number, number, number];
+  boxShadow: { offsetX: number; offsetY: number; blur: number; color: string } | null;
   groupId: string | null;     // NEW
 };
 
@@ -254,7 +255,24 @@ const EXTRACT_SCRIPT = `(() => {
       background: bg || '',
       borderColor: hasBorder ? colorRgbToHex(cs.borderTopColor) : '',
       borderWidth: bw,
-      borderRadius: parsePx(cs.borderTopLeftRadius),
+      borderRadii: [
+        parsePx(cs.borderTopLeftRadius),
+        parsePx(cs.borderTopRightRadius),
+        parsePx(cs.borderBottomRightRadius),
+        parsePx(cs.borderBottomLeftRadius),
+      ],
+      boxShadow: (function () {
+        const sh = cs.boxShadow;
+        if (!sh || sh === 'none') return null;
+        const colorMatch = sh.match(/rgba?\\([^)]+\\)/);
+        const nums = sh.replace(/rgba?\\([^)]+\\)/, '').trim().split(/\\s+/).map(parsePx);
+        return {
+          offsetX: nums[0] ?? 0,
+          offsetY: nums[1] ?? 0,
+          blur: nums[2] ?? 0,
+          color: colorMatch ? colorRgbToHex(colorMatch[0]) : '#000000',
+        };
+      })(),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }

@@ -156,7 +156,8 @@ export function measureToIR(m: PageMeasure): IRPage {
       background: d.background || undefined,
       borderColor: d.borderColor || undefined,
       borderWidth: d.borderWidth,
-      borderRadii: [d.borderRadius, d.borderRadius, d.borderRadius, d.borderRadius],
+      borderRadii: d.borderRadii,
+      boxShadow: d.boxShadow || undefined,
     };
     push(d.groupId, decor);
   }
