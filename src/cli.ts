@@ -2,9 +2,10 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { renderSlideHtml } from './render-html.js';
 import { measureSlide } from './extract-pw.js';
-import { measureToIR } from './measure-to-ir.js';
-import { buildPptx } from './pptx-build.js';
-import type { IRPage } from './types.js';
+import { measureToIRv2 } from './measure-to-ir.js';
+import { buildPptxV2 } from './pptx-build.js';
+import { postprocessPptx } from './pptx-postprocess.js';
+import type { IRPageV2 } from './types.js';
 
 function help() {
   console.error(`usage:
@@ -48,7 +49,7 @@ async function main() {
   }
 
   const measures = await measureSlide(selected);
-  const pages: IRPage[] = measures.map(measureToIR);
+  const pages: IRPageV2[] = measures.map(measureToIRv2);
 
   for (const p of pages) {
     const irPath = path.join(outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
@@ -63,23 +64,23 @@ async function main() {
     ? `${pages[0].pageName}.pptx`
     : `${path.basename(slideDir)}.pptx`;
   const pptxPath = path.join(outDir, pptxName);
-  await buildPptx(pages, pptxPath, slideDir);
+  await buildPptxV2(pages, pptxPath, slideDir);
+  await postprocessPptx(pptxPath);
   console.log(`PPTX written: ${pptxPath}`);
 }
 
-function printCoverage(pages: IRPage[]) {
+function printCoverage(pages: IRPageV2[]) {
   for (const p of pages) {
     const counts: Record<string, number> = {};
-    for (const it of p.items) {
-      counts[it.kind] = (counts[it.kind] ?? 0) + 1;
-    }
-    const unsupported = p.items.filter((it) => it.kind === 'Unsupported') as any[];
+    const walk = (items: IRPageV2['items']) => {
+      for (const it of items) {
+        counts[it.kind] = (counts[it.kind] ?? 0) + 1;
+        if (it.kind === 'Group') walk(it.children);
+      }
+    };
+    walk(p.items);
     const summary = Object.entries(counts).map(([k, v]) => `${k}=${v}`).join(' ');
-    const mark = unsupported.length ? '!' : ' ';
-    console.log(`  ${mark} ${p.pageIndex.toString().padStart(2)} ${p.pageName.padEnd(22)} ${summary}`);
-    for (const u of unsupported) {
-      console.log(`        ↳ unsupported: ${u.name}`);
-    }
+    console.log(`    ${p.pageIndex.toString().padStart(2)} ${p.pageName.padEnd(22)} ${summary}`);
   }
 }
 
