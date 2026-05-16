@@ -29,16 +29,22 @@ Published on npm as `@helping-ai-workflow/slide-to-pptx`.
 
 ```
 npm install -g @helping-ai-workflow/slide-to-pptx
-slide-to-pptx spike <slide-dir>          # builds out/<Page>.pptx
-slide-to-pptx spike <slide-dir> --page Cover
 ```
 
-Per-project install:
+## Usage
 
 ```
-npm install --save-dev @helping-ai-workflow/slide-to-pptx
-npx slide-to-pptx spike <slide-dir>
+slide-to-pptx <slide-dir>                    # builds pptx/<basename>.pptx
+slide-to-pptx <slide-dir> --page Cover       # only one page → pptx/Cover.pptx
+slide-to-pptx <slide-dir> --out build        # custom output dir
+slide-to-pptx <slide-dir> --ir               # also emit IR JSON sidecars
+slide-to-pptx <slide-dir> --ir-only          # IR only, skip pptx
+slide-to-pptx <slide-dir> --html             # dump per-page HTML for debug
+slide-to-pptx --help
 ```
+
+Default: every page in `<slide-dir>` → one `pptx/<slide-dir-basename>.pptx` in the current
+working directory.
 
 Playwright browser binaries are pulled in transitively; first run may take a moment while
 Chromium downloads.
@@ -47,8 +53,8 @@ Chromium downloads.
 
 ```
 npm install
-npm run spike     # builds out/SystemDiagram.pptx from ../my-slide/slides/mac-merge-tx-spec
-npm run spike -- --page Cover
+npm run dev -- ../my-slide/slides/mac-merge-tx-spec
+npm run dev -- ../my-slide/slides/mac-merge-tx-spec --page Cover
 ```
 
 ## How it works

@@ -41,9 +41,8 @@
     "typescript": "^5.6.3"
   },
   "scripts": {
-    "extract": "tsx src/cli.ts extract",
-    "build-pptx": "tsx src/cli.ts build",
-    "spike": "tsx src/cli.ts spike ../my-slide/slides/mac-merge-tx-spec",
+    "dev": "tsx src/cli.ts",
+    "spike": "tsx src/cli.ts ../my-slide/slides/mac-merge-tx-spec",
     "test": "node -e \"console.log('no tests yet')\""
   },
   "repository": {

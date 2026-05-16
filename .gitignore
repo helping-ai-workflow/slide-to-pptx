@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+pptx/
 *.pptx
 *.log
 .DS_Store

@@ -9,62 +9,109 @@ import type { IRPage } from './types.js';
 
 function help() {
   console.error(`usage:
-  slide-to-pptx build <slide-dir> [--page <name>]   # IR + pptx for one page or all
-  slide-to-pptx extract <slide-dir> [--page <name>] # IR JSON only
-  slide-to-pptx html <slide-dir>                    # dump per-page HTML for debug`);
+  slide-to-pptx <slide-dir> [options]
+
+  Builds <slide-dir-basename>.pptx into ./pptx/ by default.
+
+options:
+  --page <name>     only build the page whose function name matches <name>
+  --out <dir>       output directory (default: pptx)
+  --ir              also write IR JSON sidecars next to the pptx
+  --ir-only         write IR JSON only, skip pptx
+  --html            dump per-page HTML for debugging, skip pptx
+  -h, --help        show this help`);
+}
+
+type Opts = {
+  slideDir: string;
+  outDir: string;
+  pageFilter: string | null;
+  emitIR: boolean;
+  irOnly: boolean;
+  htmlOnly: boolean;
+};
+
+function parseArgs(argv: string[]): Opts | null {
+  let slideArg: string | null = null;
+  let outArg: string | null = null;
+  let pageFilter: string | null = null;
+  let emitIR = false;
+  let irOnly = false;
+  let htmlOnly = false;
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '-h' || a === '--help') return null;
+    if (a === '--page') { pageFilter = argv[++i]; continue; }
+    if (a === '--out')  { outArg     = argv[++i]; continue; }
+    if (a === '--ir')        { emitIR = true; continue; }
+    if (a === '--ir-only')   { irOnly = true; continue; }
+    if (a === '--html')      { htmlOnly = true; continue; }
+    if (a.startsWith('--')) {
+      console.error(`unknown option: ${a}`);
+      return null;
+    }
+    if (slideArg === null) { slideArg = a; continue; }
+    console.error(`unexpected positional arg: ${a}`);
+    return null;
+  }
+
+  if (!slideArg) return null;
+
+  return {
+    slideDir: path.resolve(slideArg),
+    outDir: path.resolve(outArg ?? 'pptx'),
+    pageFilter,
+    emitIR,
+    irOnly,
+    htmlOnly,
+  };
 }
 
 async function main() {
-  const [cmd, slideArg, ...rest] = process.argv.slice(2);
-  if (!cmd || !slideArg) { help(); process.exit(1); }
+  const opts = parseArgs(process.argv.slice(2));
+  if (!opts) { help(); process.exit(1); }
 
-  const slideDir = path.resolve(slideArg);
-  const pageFlagIdx = rest.indexOf('--page');
-  const pageFilter = pageFlagIdx >= 0 ? rest[pageFlagIdx + 1] : null;
+  await mkdir(opts.outDir, { recursive: true });
 
-  const outDir = path.resolve('out');
-  await mkdir(outDir, { recursive: true });
-
-  if (cmd === 'html') {
-    const allHtml = await renderSlideHtml(slideDir);
+  if (opts.htmlOnly) {
+    const allHtml = await renderSlideHtml(opts.slideDir);
     for (const p of allHtml) {
-      const hp = path.join(outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.html`);
+      const hp = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.html`);
       await writeFile(hp, p.html, 'utf8');
     }
-    console.log(`HTML written: ${allHtml.length} page(s) → ${outDir}`);
+    console.log(`HTML written: ${allHtml.length} page(s) → ${opts.outDir}`);
     return;
   }
 
-  if (cmd !== 'build' && cmd !== 'extract') {
-    help(); process.exit(1);
-  }
-
-  const allHtml = await renderSlideHtml(slideDir);
-  const selected = pageFilter
-    ? allHtml.filter((p) => p.pageName === pageFilter)
+  const allHtml = await renderSlideHtml(opts.slideDir);
+  const selected = opts.pageFilter
+    ? allHtml.filter((p) => p.pageName === opts.pageFilter)
     : allHtml;
   if (selected.length === 0) {
-    console.error(`no page matched filter "${pageFilter}"`);
+    console.error(`no page matched filter "${opts.pageFilter}"`);
     process.exit(1);
   }
 
   const measures = await measureSlide(selected);
   const pages: IRPage[] = measures.map(measureToIR);
 
-  for (const p of pages) {
-    const irPath = path.join(outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
-    await writeFile(irPath, JSON.stringify(p, null, 2), 'utf8');
+  if (opts.emitIR || opts.irOnly) {
+    for (const p of pages) {
+      const irPath = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${p.pageName}.ir.json`);
+      await writeFile(irPath, JSON.stringify(p, null, 2), 'utf8');
+    }
+    console.log(`IR written: ${pages.length} page(s) → ${opts.outDir}`);
   }
-  console.log(`IR written: ${pages.length} page(s)`);
   printCoverage(pages);
 
-  if (cmd === 'extract') return;
+  if (opts.irOnly) return;
 
-  const pptxName = pageFilter
+  const pptxName = opts.pageFilter
     ? `${pages[0].pageName}.pptx`
-    : `${path.basename(slideDir)}.pptx`;
-  const pptxPath = path.join(outDir, pptxName);
-  await buildPptx(pages, pptxPath, slideDir);
+    : `${path.basename(opts.slideDir)}.pptx`;
+  const pptxPath = path.join(opts.outDir, pptxName);
+  await buildPptx(pages, pptxPath, opts.slideDir);
   await postprocessPptx(pptxPath);
   console.log(`PPTX written: ${pptxPath}`);
 }
