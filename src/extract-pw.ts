@@ -175,6 +175,7 @@ const EXTRACT_SCRIPT = `(() => {
   for (const el of all) {
     if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
     if (INLINE_TAGS.has(el.tagName)) continue; // inline children are folded into parent
+    if (el.closest('svg')) continue; // SVG descendants handled by the svgShapes collector
 
     // Children-by-type check
     let hasOwnText = false;
