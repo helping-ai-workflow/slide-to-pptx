@@ -45,6 +45,24 @@ export type DecorBox = {
   groupId: string | null;     // NEW
 };
 
+export type SvgShape = {
+  tag: string;          // 'rect' | 'line' | 'polyline' | 'circle' | 'ellipse' | 'text'
+  rect: Rect;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  dashed?: boolean;
+  rx?: number;
+  x1: number; y1: number; x2: number; y2: number;
+  points: string;
+  markerEnd: string;
+  text: string;
+  fontSize: number;
+  fontFamily: string;
+  textAnchor: string;
+  groupId: string | null;
+};
+
 export type PageMeasure = {
   pageIndex: number;
   pageName: string;
@@ -52,6 +70,7 @@ export type PageMeasure = {
   texts: TextLeaf[];
   images: ImageLeaf[];
   decors: DecorBox[];
+  svgShapes: SvgShape[];
 };
 
 const EXTRACT_SCRIPT = `(() => {
@@ -239,7 +258,52 @@ const EXTRACT_SCRIPT = `(() => {
     });
   }
 
-  return { primitives, texts, images, decors };
+  const svgShapes = [];
+  const SVG_TAGS = new Set(['rect','line','polyline','circle','ellipse','text']);
+  for (const el of document.querySelectorAll('svg *')) {
+    if (!SVG_TAGS.has(el.tagName.toLowerCase())) continue;
+    const cs = getComputedStyle(el);
+    const rect = pickRect(el);
+    if (rect.w <= 0 && el.tagName.toLowerCase() !== 'line') continue;
+    if (rect.h <= 0 && el.tagName.toLowerCase() !== 'line') continue;
+    const x1 = parseFloat(el.getAttribute('x1') || '0');
+    const y1 = parseFloat(el.getAttribute('y1') || '0');
+    const x2 = parseFloat(el.getAttribute('x2') || '0');
+    const y2 = parseFloat(el.getAttribute('y2') || '0');
+    let lineEndpoints = null;
+    if (el.tagName.toLowerCase() === 'line') {
+      const svgEl = el.closest('svg');
+      if (svgEl) {
+        const svgRect = svgEl.getBoundingClientRect();
+        lineEndpoints = {
+          sx1: svgRect.left + x1, sy1: svgRect.top + y1,
+          sx2: svgRect.left + x2, sy2: svgRect.top + y2,
+        };
+      }
+    }
+    svgShapes.push({
+      tag: el.tagName.toLowerCase(),
+      rect,
+      fill: cs.fill && cs.fill !== 'none' ? colorRgbToHex(cs.fill) : '',
+      stroke: cs.stroke && cs.stroke !== 'none' ? colorRgbToHex(cs.stroke) : '',
+      strokeWidth: parsePx(cs.strokeWidth),
+      dashed: !!cs.strokeDasharray && cs.strokeDasharray !== 'none',
+      rx: parseFloat(el.getAttribute('rx') || '0'),
+      x1: lineEndpoints?.sx1 ?? x1,
+      y1: lineEndpoints?.sy1 ?? y1,
+      x2: lineEndpoints?.sx2 ?? x2,
+      y2: lineEndpoints?.sy2 ?? y2,
+      points: el.getAttribute('points') || '',
+      markerEnd: el.getAttribute('marker-end') || '',
+      text: el.tagName.toLowerCase() === 'text' ? (el.textContent || '').trim() : '',
+      fontSize: parsePx(cs.fontSize),
+      fontFamily: cs.fontFamily || '',
+      textAnchor: el.getAttribute('text-anchor') || 'start',
+      groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
+    });
+  }
+
+  return { primitives, texts, images, decors, svgShapes };
 })()`;
 
 export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
@@ -256,7 +320,7 @@ export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
       // design tokens, but Chromium occasionally measures pre-swap)
       await page.evaluate(() => (document as any).fonts?.ready);
       const raw = await page.evaluate(EXTRACT_SCRIPT);
-      const r = raw as { primitives: any[]; texts: TextLeaf[]; images: ImageLeaf[]; decors: DecorBox[] };
+      const r = raw as { primitives: any[]; texts: TextLeaf[]; images: ImageLeaf[]; decors: DecorBox[]; svgShapes: SvgShape[] };
       const primitives = r.primitives.map((entry: any) => {
         const rec = propsById.get(entry.id);
         return {
@@ -268,7 +332,15 @@ export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
           parentId: entry.parentId,
         } as PrimMeasure;
       });
-      out.push({ pageIndex: p.pageIndex, pageName: p.pageName, primitives, texts: r.texts, images: r.images, decors: r.decors });
+      out.push({
+        pageIndex: p.pageIndex,
+        pageName: p.pageName,
+        primitives,
+        texts: r.texts,
+        images: r.images,
+        decors: r.decors,
+        svgShapes: r.svgShapes,
+      });
     }
   } finally {
     await browser.close();

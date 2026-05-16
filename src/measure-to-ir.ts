@@ -1,5 +1,5 @@
-import type { IRGroup, IRPage, IRItem, IRRichText, IRImage, IRDecorBox, Run } from './types.js';
-import type { PageMeasure, Rect, TextLeaf, ImageLeaf, DecorBox, PrimMeasure } from './extract-pw.js';
+import type { IRGroup, IRPage, IRItem, IRRichText, IRImage, IRDecorBox, IRShape, Run } from './types.js';
+import type { PageMeasure, Rect, TextLeaf, ImageLeaf, DecorBox, PrimMeasure, SvgShape } from './extract-pw.js';
 
 const CANVAS_W = 1920 as const;
 const CANVAS_H = 1080 as const;
@@ -14,6 +14,84 @@ function pickFontFamily(family: string): 'mono' | 'body' | 'display' | undefined
   const f = family.toLowerCase();
   if (f.includes('mono') || f.includes('consolas') || f.includes('jetbrains') || f.includes('cascadia')) return 'mono';
   return 'body';
+}
+
+function svgToIR(s: SvgShape, id: string): IRItem[] {
+  switch (s.tag) {
+    case 'rect':
+      return [{
+        kind: 'Shape', id,
+        shape: (s.rx ?? 0) > 0 ? 'roundRect' : 'rect',
+        rect: r(s.rect),
+        fill: s.fill || undefined,
+        stroke: s.stroke || undefined,
+        strokeWidth: s.strokeWidth,
+        rectRadius: (s.rx ?? 0) > 0
+          ? Math.min(0.5, (s.rx as number) / Math.min(s.rect.w, s.rect.h))
+          : undefined,
+      } as IRShape];
+    case 'circle':
+    case 'ellipse':
+      return [{
+        kind: 'Shape', id, shape: 'ellipse', rect: r(s.rect),
+        fill: s.fill || undefined, stroke: s.stroke || undefined, strokeWidth: s.strokeWidth,
+      } as IRShape];
+    case 'line':
+      return [{
+        kind: 'Shape', id, shape: 'line',
+        rect: {
+          x: Math.min(s.x1, s.x2),
+          y: Math.min(s.y1, s.y2),
+          w: Math.abs(s.x2 - s.x1),
+          h: Math.abs(s.y2 - s.y1),
+        },
+        stroke: s.stroke || undefined,
+        strokeWidth: s.strokeWidth,
+        dashed: s.dashed,
+        endArrow: !!s.markerEnd,
+        flipH: s.x1 > s.x2,
+        flipV: s.y1 > s.y2,
+      } as IRShape];
+    case 'polyline': {
+      const nums = s.points.trim().split(/[\s,]+/).map(parseFloat).filter((v) => !isNaN(v));
+      const out: IRItem[] = [];
+      for (let i = 0; i + 3 < nums.length; i += 2) {
+        const x1 = nums[i], y1 = nums[i + 1], x2 = nums[i + 2], y2 = nums[i + 3];
+        out.push({
+          kind: 'Shape', id: `${id}-seg-${i / 2}`, shape: 'line',
+          rect: {
+            x: Math.min(x1, x2), y: Math.min(y1, y2),
+            w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+          },
+          stroke: s.stroke || undefined,
+          strokeWidth: s.strokeWidth,
+          flipH: x1 > x2, flipV: y1 > y2,
+        } as IRShape);
+      }
+      return out;
+    }
+    case 'text':
+      return [{
+        kind: 'RichText', id,
+        rect: r(s.rect),
+        runs: [{
+          text: s.text,
+          color: s.fill || '#1a1f2e',
+        }],
+        fontSize: s.fontSize,
+        fontFamily: s.fontFamily.toLowerCase().includes('mono')
+          || s.fontFamily.toLowerCase().includes('jetbrains')
+          || s.fontFamily.toLowerCase().includes('cascadia')
+          || s.fontFamily.toLowerCase().includes('consolas')
+          ? 'mono' : 'body',
+        align: s.textAnchor === 'middle' ? 'center'
+            : s.textAnchor === 'end' ? 'right'
+            : 'left',
+        valign: 'top',
+      } as IRRichText];
+    default:
+      return [];
+  }
 }
 
 function textLeafToRich(t: TextLeaf, id: string): IRRichText {
@@ -105,7 +183,16 @@ export function measureToIR(m: PageMeasure): IRPage {
     push(t.groupId, rich);
   }
 
-  // 6) Resolve buckets onto groups + root.
+  // 6) SVG primitives — emit one or more IR items, attribute to closest group.
+  let svgN = 0;
+  for (const s of m.svgShapes) {
+    const items = svgToIR(s, `svg-${svgN++}`);
+    for (const item of items) {
+      push(s.groupId, item);
+    }
+  }
+
+  // 8) Resolve buckets onto groups + root.
   for (const [parentId, items] of buckets) {
     if (parentId == null) continue;
     const g = groupById.get(parentId);
