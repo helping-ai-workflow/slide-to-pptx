@@ -467,7 +467,30 @@ const EXTRACT_SCRIPT = `(() => {
 })()`;
 
 export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
-  const browser: Browser = await chromium.launch({ headless: true });
+  let browser: Browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    if (msg.includes("Executable doesn't exist") || msg.includes('browserType.launch')) {
+      const hint = [
+        '',
+        'slide-to-pptx: Playwright Chromium is not installed.',
+        '',
+        'Run this once to download it (~130 MB):',
+        '    npx playwright install chromium',
+        '',
+        'If you installed slide-to-pptx with `npm install -g`, the postinstall',
+        'normally handles this — re-run with SLIDE_TO_PPTX_SKIP_BROWSER_DOWNLOAD',
+        'unset, or use the command above against this package.',
+        '',
+      ].join('\n');
+      const wrapped = new Error(hint);
+      (wrapped as any).cause = e;
+      throw wrapped;
+    }
+    throw e;
+  }
   const out: PageMeasure[] = [];
   try {
     const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });

@@ -24,7 +24,13 @@ Every shape and text run that goes into the .pptx remains selectable, editable, 
 npm install -g @helping-ai-workflow/slide-to-pptx
 ```
 
-Playwright is a transitive dependency; the first run downloads a headless Chromium (≈ 130 MB) into the package's install directory. Subsequent runs reuse it.
+A `postinstall` step downloads Playwright's headless Chromium (≈ 130 MB) into the user's Playwright cache (`~/.cache/ms-playwright` on Linux/macOS). Subsequent installs reuse it.
+
+If the download is skipped (CI, offline install, or `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` / `SLIDE_TO_PPTX_SKIP_BROWSER_DOWNLOAD=1`), run it manually before first use:
+
+```
+npx playwright install chromium
+```
 
 Requires Node ≥ 18.
 

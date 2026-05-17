@@ -17,6 +17,7 @@
   "files": [
     "bin/",
     "src/",
+    "scripts/",
     "tsconfig.json",
     "README.md",
     "LICENSE"
@@ -43,7 +44,8 @@
   "scripts": {
     "dev": "tsx src/cli.ts",
     "spike": "tsx src/cli.ts ../my-slide/slides/mac-merge-tx-spec",
-    "test": "node -e \"console.log('no tests yet')\""
+    "test": "node -e \"console.log('no tests yet')\"",
+    "postinstall": "node scripts/postinstall.cjs"
   },
   "repository": {
     "type": "git",
