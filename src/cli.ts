@@ -1,12 +1,32 @@
 import './env.js';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { renderSlideHtml } from './render-html.js';
 import { measureSlide } from './extract-pw.js';
 import { measureToIR } from './measure-to-ir.js';
 import { buildPptx } from './pptx-build.js';
 import { postprocessPptx } from './pptx-postprocess.js';
 import type { IRPage } from './types.js';
+
+async function readPackageVersion(): Promise<string> {
+  // package.json sits one directory above the built/transpiled cli.js
+  // (src/cli.ts → dist/cli.js → ../package.json). Resolve relative to
+  // this module so the lookup works regardless of cwd.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, '..', 'package.json'),
+    path.resolve(here, '..', '..', 'package.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      const raw = await readFile(p, 'utf8');
+      const v = JSON.parse(raw)?.version;
+      if (typeof v === 'string') return v;
+    } catch {}
+  }
+  return 'unknown';
+}
 
 function help() {
   console.error(`usage:
@@ -21,6 +41,7 @@ options:
   --ir-only         write IR JSON only, skip pptx
   --html            dump per-page HTML for debugging, skip pptx
   -q, --quiet       suppress progress output (errors still go to stderr)
+  -v, --version     print version and exit
   -h, --help        show this help`);
 }
 
@@ -99,7 +120,16 @@ function safeName(s: string): string {
 }
 
 async function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  if (argv.includes('-v') || argv.includes('--version')) {
+    console.log(await readPackageVersion());
+    return;
+  }
+  if (argv.includes('-h') || argv.includes('--help')) {
+    help();
+    return;
+  }
+  const opts = parseArgs(argv);
   if (!opts) { help(); process.exit(1); }
 
   const info = opts.quiet ? () => {} : (msg: string) => console.log(msg);
