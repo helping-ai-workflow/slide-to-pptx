@@ -69,6 +69,13 @@ function renderRichText(
     fontSize: fs,
     align: (it.align as any) || 'left',
     valign: (it.valign as any) || 'top',
+    // Auto-shrink when CJK / display-font fallback in PowerPoint renders
+    // wider than chromium measured. Without this, large headings overflow
+    // and wrap onto an extra line because the captured rect is too tight.
+    // `fit: 'shrink'` emits <a:normAutofit/> — PowerPoint shrinks font on
+    // overflow at view time. `autoFit: true` (<a:spAutoFit/>) only resizes
+    // the shape, which doesn't fix width-constrained wrap.
+    fit: 'shrink',
     objectName: nameFor(groupChain, it.id),
   } as any);
 }
@@ -198,13 +205,21 @@ function renderItem(
   }
 }
 
-export async function buildPptx(pages: IRPage[], outPath: string, assetRoot = process.cwd()) {
+export async function buildPptx(pages: IRPage[], outPath: string, assetRoot = process.cwd(), design?: any) {
   const pres = new pptxgen();
   pres.defineLayout({ name: 'CANVAS', width: SLIDE_W_IN, height: SLIDE_H_IN });
   pres.layout = 'CANVAS';
+  // Slide background: honor design.palette.bg so dark-theme decks render
+  // correctly. Falls back to a neutral cream so legacy decks without an
+  // explicit bg keep their prior appearance.
+  const bgHex = (() => {
+    const raw = design?.palette?.bg;
+    if (typeof raw !== 'string') return 'F7F5F0';
+    return hex(raw) || 'F7F5F0';
+  })();
   for (const page of pages) {
     const slide = pres.addSlide();
-    slide.background = { color: 'F7F5F0' };
+    slide.background = { color: bgHex };
     for (const it of page.items) renderItem(slide, it, [], assetRoot);
   }
   await pres.writeFile({ fileName: outPath });

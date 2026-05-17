@@ -107,7 +107,7 @@ async function main() {
   await mkdir(opts.outDir, { recursive: true });
 
   if (opts.htmlOnly) {
-    const allHtml = await renderSlideHtml(opts.slideDir);
+    const { pages: allHtml } = await renderSlideHtml(opts.slideDir);
     for (const p of allHtml) {
       const hp = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${safeName(p.pageName)}.html`);
       await writeFile(hp, p.html, 'utf8');
@@ -116,7 +116,7 @@ async function main() {
     return;
   }
 
-  const allHtml = await renderSlideHtml(opts.slideDir);
+  const { pages: allHtml, design } = await renderSlideHtml(opts.slideDir);
   const selected = opts.pageFilter
     ? allHtml.filter((p) => p.pageName === opts.pageFilter)
     : allHtml;
@@ -143,7 +143,7 @@ async function main() {
     ? `${safeName(pages[0].pageName)}.pptx`
     : `${safeName(path.basename(opts.slideDir))}.pptx`;
   const pptxPath = path.join(opts.outDir, pptxName);
-  await buildPptx(pages, pptxPath, opts.slideDir);
+  await buildPptx(pages, pptxPath, opts.slideDir, design);
   await postprocessPptx(pptxPath);
   info(`PPTX written: ${pptxPath}`);
 }

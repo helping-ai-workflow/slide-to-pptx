@@ -80,6 +80,26 @@ const EXTRACT_SCRIPT = `(() => {
     return { x: r.left, y: r.top, w: r.width, h: r.height };
   };
 
+  // Text-leaf rect: when content overflows the layout box (scrollWidth >
+  // clientWidth, no clip), the displayed text actually spans wider than the
+  // border-box. Using the border-box would let PowerPoint wrap at the
+  // narrower number even though the original layout shows it on one line.
+  const pickTextRect = (el) => {
+    const r = el.getBoundingClientRect();
+    let w = r.width;
+    const cs = getComputedStyle(el);
+    const clipped = cs.overflow !== 'visible' && cs.overflow !== '' || cs.whiteSpace === 'nowrap' && false;
+    // Inline elements: scrollWidth is meaningless on them; their bounding
+    // rect already reflects the line-box content.
+    if (el.nodeType === 1 && !INLINE_TAGS.has(el.tagName)) {
+      if (cs.overflow === 'visible' || cs.overflow === '') {
+        const sw = el.scrollWidth;
+        if (sw > w + 1) w = sw;
+      }
+    }
+    return { x: r.left, y: r.top, w, h: r.height };
+  };
+
   const PRIM_ELEMENTS = Array.from(document.querySelectorAll('[data-prim-id]'));
   const primitives = PRIM_ELEMENTS.map((el) => {
     const svg = el.closest('svg');
@@ -103,9 +123,11 @@ const EXTRACT_SCRIPT = `(() => {
 
   const images = [];
   for (const img of document.querySelectorAll('img')) {
-    if (inPrim.has(img)) continue;
     // Use the positioned wrapper as the rect so an image with objectFit:contain
     // shrinking inside a 540x700 panel still fills the panel in pptx.
+    // Note: do NOT skip imgs inside primitives — every component is tagged
+    // as a primitive, so skipping would drop all <img> elements (logos,
+    // illustrations) that live inside any React component.
     const wrapper = img.parentElement;
     const rect = wrapper ? pickRect(wrapper) : pickRect(img);
     images.push({
@@ -138,10 +160,29 @@ const EXTRACT_SCRIPT = `(() => {
 
   const INLINE_TAGS = new Set(['SPAN','EM','STRONG','B','I','A','CODE','SUP','SUB','MARK','U','SMALL','KBD','SAMP','VAR','BR','WBR','NOBR']);
 
+  // Pick a usable text color when CSS uses the gradient-text trick
+  // (background-image linear-gradient + background-clip text + transparent color):
+  // the computed color is transparent so falling back to it produces invisible
+  // text in pptx. Parse the first color stop from background-image instead.
+  const firstGradientColor = (bgImage) => {
+    if (!bgImage || bgImage === 'none') return '';
+    const m = /rgba?\\([^)]+\\)|#[0-9a-f]{3,8}/i.exec(bgImage);
+    return m ? m[0] : '';
+  };
+  const effectiveColor = (cs) => {
+    const raw = cs.color || '';
+    const parsed = parseColor(raw);
+    const clip = cs.webkitBackgroundClip || cs.backgroundClip || '';
+    if (parsed && parsed.a === 0 && clip.includes('text')) {
+      const grad = firstGradientColor(cs.backgroundImage || '');
+      if (grad) return colorRgbToHex(grad) || colorRgbToHex(raw);
+    }
+    return colorRgbToHex(raw);
+  };
   const styleSig = (el) => {
     const cs = getComputedStyle(el);
     return {
-      color: colorRgbToHex(cs.color),
+      color: effectiveColor(cs),
       bold: parseInt(cs.fontWeight, 10) >= 600,
       italic: cs.fontStyle === 'italic',
       mono: (cs.fontFamily || '').toLowerCase().includes('mono')
@@ -194,21 +235,88 @@ const EXTRACT_SCRIPT = `(() => {
     if (!hasOwnText || hasBlockChild) continue;
 
     const cs = getComputedStyle(el);
-    const rect = pickRect(el);
+    // Count direct text vs text-bearing inline children. When the block has
+    // 2+ inline children that each carry their own text (e.g. flex/grid
+    // layout with span on each side), emitting one merged leaf at the
+    // block's full width concatenates the strings and PowerPoint then re-
+    // wraps everything inside that single box — losing the original spatial
+    // separation. Instead emit one leaf per inline child using its own rect.
+    let directTextLen = 0;
+    const textInlineChildren = [];
+    for (const c of el.childNodes) {
+      if (c.nodeType === 3 && c.textContent && c.textContent.trim()) {
+        directTextLen += c.textContent.trim().length;
+      } else if (c.nodeType === 1 && isInlineEl(c) && c.textContent && c.textContent.trim()) {
+        textInlineChildren.push(c);
+      }
+    }
+
+    // Per-text padding helper: chromium gives content-fit bounds, but
+    // PowerPoint's font fallback (Cascadia for JetBrains Mono, system CJK
+    // for PingFang TC / Noto Sans TC) renders wider. Pad proportional to
+    // fontSize so big headings (hero / kicker) get enough slack to stay on
+    // one line. The legacy +8/+4 floor still applies for small body text.
+    const padRect = (r, fs) => {
+      r.w += Math.max(24, fs * 0.35);
+      r.h += Math.max(8, fs * 0.15);
+      return r;
+    };
+
+    if (directTextLen === 0 && textInlineChildren.length >= 2) {
+      for (const c of textInlineChildren) {
+        const ccs = getComputedStyle(c);
+        const crect = pickTextRect(c);
+        if (crect.w <= 0 || crect.h <= 0) continue;
+        const cfs = parsePx(ccs.fontSize);
+        padRect(crect, cfs);
+        texts.push({
+          rect: crect,
+          text: trim(c.textContent),
+          runs: collectRuns(c),
+          fontSize: cfs,
+          fontFamily: ccs.fontFamily,
+          fontWeight: parseInt(ccs.fontWeight, 10) || 400,
+          color: effectiveColor(ccs),
+          background: ccs.backgroundColor && ccs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? colorRgbToHex(ccs.backgroundColor) : '',
+          borderColor: ccs.borderTopWidth !== '0px' ? colorRgbToHex(ccs.borderTopColor) : '',
+          borderRadius: parsePx(ccs.borderTopLeftRadius),
+          textAlign: ccs.textAlign,
+          padding: {
+            t: parsePx(ccs.paddingTop),
+            r: parsePx(ccs.paddingRight),
+            b: parsePx(ccs.paddingBottom),
+            l: parsePx(ccs.paddingLeft),
+          },
+          groupId: c.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
+        });
+      }
+      continue;
+    }
+
+    const rect = pickTextRect(el);
     if (rect.w <= 0 || rect.h <= 0) continue;
-    // Pad measured rect slightly: chromium gives content-fit bounds, but
-    // PowerPoint's font fallback (Cascadia for JetBrains Mono) renders ~5%
-    // wider; without padding short single-line text wraps to two lines.
-    rect.w += 8;
-    rect.h += 4;
+    // Effective font size: when the block has no direct text node and all text
+    // lives in inline children (e.g. <div><span bar/><span fontSize:30>txt</span></div>),
+    // the block's own computed fontSize is the inherited default — not the
+    // size the user sees. Pick the largest inline-text-bearing child's fontSize.
+    let effFontSize = parsePx(cs.fontSize);
+    if (directTextLen === 0 && textInlineChildren.length > 0) {
+      let bestFs = 0;
+      for (const c of textInlineChildren) {
+        const fs = parsePx(getComputedStyle(c).fontSize);
+        if (fs > bestFs) bestFs = fs;
+      }
+      if (bestFs > 0) effFontSize = bestFs;
+    }
+    padRect(rect, effFontSize);
     texts.push({
       rect,
       text: trim(el.textContent),
       runs: collectRuns(el),
-      fontSize: parsePx(cs.fontSize),
+      fontSize: effFontSize,
       fontFamily: cs.fontFamily,
       fontWeight: parseInt(cs.fontWeight, 10) || 400,
-      color: colorRgbToHex(cs.color),
+      color: effectiveColor(cs),
       background: cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? colorRgbToHex(cs.backgroundColor) : '',
       borderColor: cs.borderTopWidth !== '0px' ? colorRgbToHex(cs.borderTopColor) : '',
       borderRadius: parsePx(cs.borderTopLeftRadius),
@@ -502,6 +610,23 @@ export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
       // give web fonts a beat to settle (we set deterministic fonts via the
       // design tokens, but Chromium occasionally measures pre-swap)
       await page.evaluate(() => (document as any).fonts?.ready);
+      // Skip CSS animations to end state before measuring. Decks commonly
+      // use entrance animations (opacity 0 → 1, width 0 → 100%) whose
+      // starting state has zero width or invisible content — measuring
+      // mid-animation produces empty rects or omits text entirely.
+      await page.addStyleTag({
+        content: `
+          *, *::before, *::after {
+            animation-duration: 0s !important;
+            animation-delay: 0s !important;
+            animation-fill-mode: forwards !important;
+            transition-duration: 0s !important;
+            transition-delay: 0s !important;
+          }
+        `,
+      });
+      // One extra rAF tick so layout reflects the post-animation state.
+      await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
       const raw = await page.evaluate(EXTRACT_SCRIPT);
       const r = raw as { primitives: any[]; texts: TextLeaf[]; images: ImageLeaf[]; decors: DecorBox[]; svgShapes: SvgShape[] };
       const primitives = r.primitives.map((entry: any) => {

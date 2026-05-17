@@ -21,6 +21,11 @@ export type PageHtml = {
   primitives: PrimRecord[];
 };
 
+export type SlideRender = {
+  pages: PageHtml[];
+  design: any;
+};
+
 function escAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
@@ -73,20 +78,27 @@ h1, h2, h3, h4, h5, h6, p, ul, ol { margin: 0; padding: 0; }
 function designToCss(design: any): string {
   const p = design?.palette ?? {};
   const f = design?.fonts ?? {};
+  const t = design?.typeScale ?? {};
   const parts: string[] = [];
   if (p.bg) parts.push(`--osd-bg: ${p.bg};`);
   if (p.text) parts.push(`--osd-text: ${p.text};`);
   if (p.accent) parts.push(`--osd-accent: ${p.accent};`);
   if (f.display) parts.push(`--osd-font-display: ${f.display};`);
   if (f.body) parts.push(`--osd-font-body: ${f.body};`);
+  // typeScale → CSS pixel values. Decks reference these as
+  // `var(--osd-size-hero)` / `var(--osd-size-body)`. Without the vars the
+  // browser falls back to inherited 16px and the hero text rasterises tiny.
+  if (typeof t.hero === 'number') parts.push(`--osd-size-hero: ${t.hero}px;`);
+  if (typeof t.body === 'number') parts.push(`--osd-size-body: ${t.body}px;`);
   return parts.join(' ');
 }
 
-export async function renderSlideHtml(slideDir: string): Promise<PageHtml[]> {
+export async function renderSlideHtml(slideDir: string): Promise<SlideRender> {
   const mod = await loadSlideModule(slideDir);
   const pages = (mod as any).default as Array<() => React.ReactNode>;
   if (!Array.isArray(pages)) throw new Error('slide module default export must be an array of pages');
-  const designCss = designToCss((mod as any).design);
+  const design = (mod as any).design ?? {};
+  const designCss = designToCss(design);
 
   const assetMap = new Map<string, string>();
   const out: PageHtml[] = [];
@@ -106,5 +118,5 @@ export async function renderSlideHtml(slideDir: string): Promise<PageHtml[]> {
     body = await rewriteAssetUrls(body, slideDir, assetMap);
     out.push({ pageIndex: i, pageName, html: htmlShell(body, designCss), primitives });
   }
-  return out;
+  return { pages: out, design };
 }
