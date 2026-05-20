@@ -106,6 +106,7 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
           fontSize: s.fontSize,
           fontFamily: s.fontFamily,
         }),
+        fallbackImageDataUrl: s.fallbackImageDataUrl,
       } as IRRichText];
     }
     default:
@@ -141,6 +142,7 @@ function textLeafToRich(t: TextLeaf, id: string): IRRichText {
       fontSize: t.fontSize,
       fontFamily: t.fontFamily,
     }),
+    fallbackImageDataUrl: t.fallbackImageDataUrl,
   };
 }
 
@@ -188,6 +190,7 @@ export function measureToIR(m: PageMeasure): IRPage {
       background: d.background,
       borderWidth: d.borderWidth,
     });
+    if (d.fallbackImageDataUrl) decor.fallbackImageDataUrl = d.fallbackImageDataUrl;
     push(d.groupId, decor);
   }
 
@@ -213,6 +216,7 @@ export function measureToIR(m: PageMeasure): IRPage {
       rect: im.rect,
       src: im.src,
     });
+    if (im.fallbackImageDataUrl) img.fallbackImageDataUrl = im.fallbackImageDataUrl;
     push(im.groupId, img);
   }
 
@@ -239,6 +243,7 @@ export function measureToIR(m: PageMeasure): IRPage {
           hasPattern: false,
           hasMask: false,
         });
+        if (s.fallbackImageDataUrl) item.fallbackImageDataUrl = s.fallbackImageDataUrl;
       }
       push(s.groupId, item);
     }

@@ -164,3 +164,41 @@ test('text leaf with no feature flags still → TextRun', () => {
   });
   assert.equal(res.kind, 'TextRun');
 });
+
+test('measureToIR threads fallbackImageDataUrl through to IR', () => {
+  const fakePage = {
+    pageIndex: 0,
+    pageName: 'Test',
+    primitives: [{
+      id: 'p0', parentId: null, name: 'Root',
+      rect: { x: 0, y: 0, w: 1920, h: 1080 },
+      svgOffset: null, props: {},
+    }],
+    decors: [{
+      groupId: 'p0',
+      leafId: 'p0:0',
+      rect: { x: 0, y: 0, w: 200, h: 100 },
+      background: '#fff',
+      borderWidth: 0,
+      borderRadii: [0, 0, 0, 0],
+      boxShadow: null,
+      cssFeatureFlags: { filter: 'blur(4px)', mask: '', clipPath: '',
+        mixBlendMode: '', transform: '', animationName: '' },
+      fallbackImageDataUrl: 'data:image/png;base64,XXXX',
+    }],
+    images: [], texts: [], svgShapes: [],
+  };
+
+  const ir = measureToIR(fakePage as any);
+  let found = false;
+  function walk(items: typeof ir.items): void {
+    for (const it of items) {
+      if (it.kind === 'Group') { walk(it.children); continue; }
+      if (it.kind === 'Decor' && it.fallbackImageDataUrl === 'data:image/png;base64,XXXX') {
+        found = true;
+      }
+    }
+  }
+  walk(ir.items);
+  assert.ok(found, 'expected Decor leaf to carry fallbackImageDataUrl');
+});
