@@ -44,8 +44,9 @@
   "scripts": {
     "dev": "tsx src/cli.ts",
     "spike": "tsx src/cli.ts ../my-slide/slides/mac-merge-tx-spec",
-    "test": "node --import tsx --test $(find tests -name '*.test.ts')",
+    "test": "node --import tsx --test $(find tests -name '*.test.ts' -not -name 'corpus.test.ts')",
     "test:corpus": "node --import tsx --test tests/corpus.test.ts",
+    "test:all": "node --import tsx --test $(find tests -name '*.test.ts')",
     "postinstall": "node scripts/postinstall.cjs"
   },
   "repository": {
