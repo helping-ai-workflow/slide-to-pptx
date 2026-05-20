@@ -11,3 +11,5 @@ docs/superpowers/
 tests/fixtures/**/*.pptx
 tests/fixtures/**/*.snapshots/
 tests/fixtures/**/*.fidelity.json
+tests/fixtures/**/*.html
+tests/fixtures/**/*.ir.json

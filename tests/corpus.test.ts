@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 const FIXTURE = path.resolve(import.meta.dirname, 'fixtures/minimal-deck');
 const BIN = path.resolve(import.meta.dirname, '..', 'bin/slide-to-pptx.cjs');
 
-test('CLI on minimal-deck writes pptx + snapshots', () => {
+test('CLI on minimal-deck writes pptx, snapshots, and fidelity report', async () => {
   const result = spawnSync('node', [BIN, FIXTURE, '--quiet'], {
     encoding: 'utf8',
     timeout: 60_000,
@@ -24,10 +24,7 @@ test('CLI on minimal-deck writes pptx + snapshots', () => {
 
   const firstSnap = path.join(snapshotDir, '00-Title.png');
   assert.ok(existsSync(firstSnap), `expected ${firstSnap}`);
-});
 
-test('CLI on minimal-deck writes a well-formed fidelity report', async () => {
-  // The previous test already ran the CLI. Reuse its output.
   const reportPath = path.join(FIXTURE, 'minimal-deck.fidelity.json');
   assert.ok(existsSync(reportPath), 'fidelity.json missing');
 
