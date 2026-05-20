@@ -74,6 +74,13 @@ export type SvgShape = {
   fontSize: number;
   fontFamily: string;
   textAnchor: string;
+  // Structural flags for the classifier. `hasPath` is set when the parent SVG
+  // contains at least one <path d="..."> element; same for the others. These
+  // are computed once per <svg> root and propagated to every shape it contains.
+  hasPath: boolean;
+  hasUse: boolean;
+  hasPattern: boolean;
+  hasMask: boolean;
   groupId: string | null;
 };
 
@@ -441,6 +448,7 @@ const EXTRACT_SCRIPT = `(() => {
           rx: 0, x1, y1, x2, y2, points: '',
           markerEnd: '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+          hasPath: false, hasUse: false, hasPattern: false, hasMask: false,
           groupId,
         });
       };
@@ -526,6 +534,15 @@ const EXTRACT_SCRIPT = `(() => {
 
   const svgShapes = [];
   const SVG_TAGS = new Set(['rect','line','polyline','circle','ellipse','text','path']);
+  const svgRootFlags = new WeakMap();
+  for (const svg of document.querySelectorAll('svg')) {
+    svgRootFlags.set(svg, {
+      hasPath:    !!svg.querySelector('path'),
+      hasUse:     !!svg.querySelector('use'),
+      hasPattern: !!svg.querySelector('pattern'),
+      hasMask:    !!svg.querySelector('mask'),
+    });
+  }
   for (const el of document.querySelectorAll('svg *')) {
     const tag = el.tagName.toLowerCase();
     if (!SVG_TAGS.has(tag)) continue;
@@ -560,6 +577,7 @@ const EXTRACT_SCRIPT = `(() => {
           points: '',
           markerEnd: k === segs.length - 1 ? me : '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+          ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
           groupId: gid,
         });
       }
@@ -601,6 +619,7 @@ const EXTRACT_SCRIPT = `(() => {
       fontSize: parsePx(cs.fontSize),
       fontFamily: cs.fontFamily || '',
       textAnchor: el.getAttribute('text-anchor') || 'start',
+      ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
