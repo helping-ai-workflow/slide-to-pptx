@@ -6,6 +6,15 @@ import type { PrimRecord } from './instrument.js';
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
+export type CssFeatureFlags = {
+  filter: string;        // e.g. 'blur(8px)' | ''
+  mask: string;          // computed mask-image when not 'none'
+  clipPath: string;      // computed clip-path when not 'none'
+  mixBlendMode: string;  // when not 'normal'
+  transform: string;     // when not 'none' AND not a translate/rotate-only matrix
+  animationName: string; // when not 'none' — recorded for reference only
+};
+
 export type PrimMeasure = {
   id: string;
   name: string;
@@ -28,6 +37,7 @@ export type TextLeaf = {
   borderRadius: number;
   textAlign: string;
   padding: { t: number; r: number; b: number; l: number };
+  cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
 };
 
@@ -45,6 +55,7 @@ export type DecorBox = {
   borderWidth: number;
   borderRadii: [number, number, number, number];
   boxShadow: { offsetX: number; offsetY: number; blur: number; color: string } | null;
+  cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
 };
 
@@ -159,6 +170,28 @@ const EXTRACT_SCRIPT = `(() => {
     return toHex(c.a < 1 ? blendOver(c) : c);
   };
   const parsePx = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+  const isTrivialTransform = (t) => {
+    if (!t || t === 'none') return true;
+    const m = /^matrix\\(([^)]+)\\)/.exec(t);
+    if (m) {
+      const v = m[1].split(',').map((s) => parseFloat(s.trim()));
+      if (v.length === 6) {
+        const [a, b, c, d] = v;
+        const isPureRotate = Math.abs(a*a + b*b - 1) < 1e-3 && Math.abs(c*c + d*d - 1) < 1e-3;
+        return isPureRotate;
+      }
+    }
+    return false;
+  };
+  const buildCssFeatureFlags = (cs) => ({
+    filter: cs.filter && cs.filter !== 'none' ? cs.filter : '',
+    mask: cs.mask && cs.mask !== 'none' ? cs.mask : '',
+    clipPath: cs.clipPath && cs.clipPath !== 'none' ? cs.clipPath : '',
+    mixBlendMode: cs.mixBlendMode && cs.mixBlendMode !== 'normal' ? cs.mixBlendMode : '',
+    transform: isTrivialTransform(cs.transform) ? '' : cs.transform,
+    animationName: cs.animationName && cs.animationName !== 'none' ? cs.animationName : '',
+  });
 
   const INLINE_TAGS = new Set(['SPAN','EM','STRONG','B','I','A','CODE','SUP','SUB','MARK','U','SMALL','KBD','SAMP','VAR','BR','WBR','NOBR']);
 
@@ -289,6 +322,7 @@ const EXTRACT_SCRIPT = `(() => {
             b: parsePx(ccs.paddingBottom),
             l: parsePx(ccs.paddingLeft),
           },
+          cssFeatureFlags: buildCssFeatureFlags(ccs),
           groupId: c.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
         });
       }
@@ -329,6 +363,7 @@ const EXTRACT_SCRIPT = `(() => {
         b: parsePx(cs.paddingBottom),
         l: parsePx(cs.paddingLeft),
       },
+      cssFeatureFlags: buildCssFeatureFlags(cs),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
@@ -388,6 +423,7 @@ const EXTRACT_SCRIPT = `(() => {
           color: colorMatch ? colorRgbToHex(colorMatch[0]) : '#000000',
         };
       })(),
+      cssFeatureFlags: buildCssFeatureFlags(cs),
       groupId,
     });
 
