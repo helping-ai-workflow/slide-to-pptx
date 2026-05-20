@@ -149,23 +149,23 @@ const EXTRACT_SCRIPT = `(() => {
     let n; while ((n = walker.nextNode())) inPrim.add(n);
   }
 
-  const images = [];
-  for (const img of document.querySelectorAll('img')) {
-    // Use the positioned wrapper as the rect so an image with objectFit:contain
-    // shrinking inside a 540x700 panel still fills the panel in pptx.
-    // Note: do NOT skip imgs inside primitives — every component is tagged
-    // as a primitive, so skipping would drop all <img> elements (logos,
-    // illustrations) that live inside any React component.
-    const wrapper = img.parentElement;
-    const rect = wrapper ? pickRect(wrapper) : pickRect(img);
-    images.push({
-      rect,
-      src: img.getAttribute('src') || '',
-      alt: img.getAttribute('alt') || '',
-      leafId: leafIdOf(img),
-      groupId: img.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
-    });
-  }
+  // IMPORTANT: leafIdOf must be defined before the images loop (and any other
+  // loop that calls it) — 'const' is not hoisted, so calling it before its
+  // declaration throws a TDZ ReferenceError when the script is eval-ed.
+  const leafIdOf = (el) => {
+    const prim = el.closest('[data-prim-id]');
+    const primId = prim?.getAttribute('data-prim-id') || 'root';
+    const path = [];
+    let cur = el;
+    while (cur && cur !== prim && cur.parentElement) {
+      const sibs = Array.from(cur.parentElement.children);
+      path.unshift(sibs.indexOf(cur));
+      cur = cur.parentElement;
+    }
+    const id = path.length === 0 ? primId : primId + ':' + path.join('.');
+    if (!el.getAttribute('data-leaf-id')) el.setAttribute('data-leaf-id', id);
+    return id;
+  };
 
   const trim = (s) => (s || '').replace(/\\s+/g, ' ').trim();
   const parseColor = (s) => {
@@ -187,20 +187,23 @@ const EXTRACT_SCRIPT = `(() => {
   };
   const parsePx = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
-  const leafIdOf = (el) => {
-    const prim = el.closest('[data-prim-id]');
-    const primId = prim?.getAttribute('data-prim-id') || 'root';
-    const path = [];
-    let cur = el;
-    while (cur && cur !== prim && cur.parentElement) {
-      const sibs = Array.from(cur.parentElement.children);
-      path.unshift(sibs.indexOf(cur));
-      cur = cur.parentElement;
-    }
-    const id = path.length === 0 ? primId : primId + ':' + path.join('.');
-    if (!el.getAttribute('data-leaf-id')) el.setAttribute('data-leaf-id', id);
-    return id;
-  };
+  const images = [];
+  for (const img of document.querySelectorAll('img')) {
+    // Use the positioned wrapper as the rect so an image with objectFit:contain
+    // shrinking inside a 540x700 panel still fills the panel in pptx.
+    // Note: do NOT skip imgs inside primitives — every component is tagged
+    // as a primitive, so skipping would drop all <img> elements (logos,
+    // illustrations) that live inside any React component.
+    const wrapper = img.parentElement;
+    const rect = wrapper ? pickRect(wrapper) : pickRect(img);
+    images.push({
+      rect,
+      src: img.getAttribute('src') || '',
+      alt: img.getAttribute('alt') || '',
+      leafId: leafIdOf(img),
+      groupId: img.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
+    });
+  }
 
   const isTrivialTransform = (t) => {
     if (!t || t === 'none') return true;
