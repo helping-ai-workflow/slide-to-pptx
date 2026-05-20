@@ -38,6 +38,23 @@ const hex = (c?: string) => {
 
 const MONO = 'JetBrains Mono';
 
+// ─── ImageFallback Emitter ────────────────────────────────────────────────────
+
+function emitFallbackImage(
+  slide: pptxgen.Slide,
+  leaf: { rect: { x: number; y: number; w: number; h: number }; fallbackImageDataUrl?: string },
+): boolean {
+  if (!leaf.fallbackImageDataUrl) return false;
+  slide.addImage({
+    data: leaf.fallbackImageDataUrl,
+    x: px(leaf.rect.x),
+    y: py(leaf.rect.y),
+    w: px(leaf.rect.w),
+    h: py(leaf.rect.h),
+  } as any);
+  return true;
+}
+
 // ─── Generic Mappers ──────────────────────────────────────────────────────────
 
 function nameFor(group: string[] | null, localId: string): string {
@@ -192,6 +209,10 @@ function renderItem(
   groupChain: string[],
   assetRoot: string,
 ) {
+  if ((it as any).classification?.kind === 'ImageFallback'
+      && emitFallbackImage(slide, it as any)) {
+    return;
+  }
   switch (it.kind) {
     case 'Group': {
       const chain = [...groupChain, it.id];
