@@ -141,6 +141,7 @@ function textLeafToRich(t: TextLeaf, id: string): IRRichText {
       color: t.color,
       fontSize: t.fontSize,
       fontFamily: t.fontFamily,
+      cssFeatureFlags: t.cssFeatureFlags,
     }),
     fallbackImageDataUrl: t.fallbackImageDataUrl,
   };
@@ -189,6 +190,7 @@ export function measureToIR(m: PageMeasure): IRPage {
       rect: d.rect,
       background: d.background,
       borderWidth: d.borderWidth,
+      cssFeatureFlags: d.cssFeatureFlags,
     });
     if (d.fallbackImageDataUrl) decor.fallbackImageDataUrl = d.fallbackImageDataUrl;
     push(d.groupId, decor);

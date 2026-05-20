@@ -131,7 +131,9 @@ function collectClassifications(items: IRItem[]): PageClassificationSummary['cla
   const out: PageClassificationSummary['classifications'] = [];
   for (const it of items) {
     if (it.kind === 'Group') { out.push(...collectClassifications(it.children)); continue; }
-    if (it.classification) out.push(it.classification);
+    if (it.classification) {
+      out.push({ leafId: it.id, classification: it.classification });
+    }
   }
   return out;
 }

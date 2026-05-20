@@ -18,5 +18,20 @@ function Title() {
   );
 }
 
-const pages: Page[] = [Title];
+function FilterPage() {
+  return (
+    <div style={{ width: 1920, height: 1080, padding: 120, position: 'relative' }}>
+      <div
+        style={{
+          width: 300,
+          height: 200,
+          background: '#4a6cf7',
+          filter: 'blur(8px)',
+        }}
+      />
+    </div>
+  );
+}
+
+const pages: Page[] = [Title, FilterPage];
 export default pages;
