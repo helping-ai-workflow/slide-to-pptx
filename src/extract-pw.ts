@@ -1,4 +1,6 @@
 import { chromium, type Browser } from 'playwright';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import type { PageHtml } from './render-html.js';
 import type { PrimRecord } from './instrument.js';
 
@@ -574,7 +576,16 @@ const EXTRACT_SCRIPT = `(() => {
   return { primitives, texts, images, decors, svgShapes };
 })()`;
 
-export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
+export type MeasureOptions = {
+  // When set, the function writes a 1920×1080 PNG per page next to the
+  // pptx output. Reuses the Playwright page already loaded for measurement.
+  snapshotDir?: string;
+};
+
+export async function measureSlide(
+  pages: PageHtml[],
+  opts: MeasureOptions = {},
+): Promise<PageMeasure[]> {
   let browser: Browser;
   try {
     browser = await chromium.launch({ headless: true });
@@ -649,6 +660,16 @@ export async function measureSlide(pages: PageHtml[]): Promise<PageMeasure[]> {
         decors: r.decors,
         svgShapes: r.svgShapes,
       });
+      if (opts.snapshotDir) {
+        await mkdir(opts.snapshotDir, { recursive: true });
+        const idx = p.pageIndex.toString().padStart(2, '0');
+        const safe = (p.pageName || `page-${p.pageIndex}`)
+          .replace(/[^\w.-]+/g, '_')
+          .replace(/^\.+/, '_')
+          .slice(0, 120) || '_';
+        const outPath = path.join(opts.snapshotDir, `${idx}-${safe}.png`);
+        await page.screenshot({ path: outPath, fullPage: false, clip: { x: 0, y: 0, width: 1920, height: 1080 } });
+      }
     }
   } finally {
     await browser.close();

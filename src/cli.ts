@@ -40,6 +40,8 @@ options:
   --ir              also write IR JSON sidecars next to the pptx
   --ir-only         write IR JSON only, skip pptx
   --html            dump per-page HTML for debugging, skip pptx
+  --snapshots       write HTML-render PNGs next to pptx (default on)
+  --no-snapshots    suppress snapshot sidecars
   -q, --quiet       suppress progress output (errors still go to stderr)
   -v, --version     print version and exit
   -h, --help        show this help`);
@@ -53,6 +55,7 @@ type Opts = {
   irOnly: boolean;
   htmlOnly: boolean;
   quiet: boolean;
+  snapshots: boolean;
 };
 
 function parseArgs(argv: string[]): Opts | null {
@@ -63,6 +66,7 @@ function parseArgs(argv: string[]): Opts | null {
   let irOnly = false;
   let htmlOnly = false;
   let quiet = false;
+  let snapshots = true;
 
   const takeValue = (flag: string, i: number): string | null => {
     const next = argv[i + 1];
@@ -88,6 +92,8 @@ function parseArgs(argv: string[]): Opts | null {
     if (a === '--ir-only')   { irOnly = true; continue; }
     if (a === '--html')      { htmlOnly = true; continue; }
     if (a === '-q' || a === '--quiet') { quiet = true; continue; }
+    if (a === '--snapshots')    { snapshots = true; continue; }
+    if (a === '--no-snapshots') { snapshots = false; continue; }
     if (a.startsWith('-')) {
       console.error(`unknown option: ${a}`);
       return null;
@@ -108,6 +114,7 @@ function parseArgs(argv: string[]): Opts | null {
     irOnly,
     htmlOnly,
     quiet,
+    snapshots,
   };
 }
 
@@ -155,7 +162,11 @@ async function main() {
     process.exit(1);
   }
 
-  const measures = await measureSlide(selected);
+  const deckBase = safeName(path.basename(opts.slideDir));
+  const snapshotDir = opts.snapshots
+    ? path.join(opts.outDir, `${deckBase}.snapshots`)
+    : undefined;
+  const measures = await measureSlide(selected, { snapshotDir });
   const pages: IRPage[] = measures.map(measureToIR);
 
   if (opts.emitIR || opts.irOnly) {
