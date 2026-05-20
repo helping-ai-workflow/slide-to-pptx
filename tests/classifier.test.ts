@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NativeKind, LeafClassification } from '../src/types.ts';
 
-test('NativeKind enum covers six canonical leaf classes', () => {
-  const kinds: NativeKind[] = ['TextRun', 'Image', 'Box', 'Line', 'Table', 'SvgIcon'];
-  assert.equal(kinds.length, 6);
+test('NativeKind union covers all seven canonical leaf classes', () => {
+  const kinds: NativeKind[] = ['TextRun', 'Image', 'Box', 'Line', 'Table', 'SvgIcon', 'ImageFallback'];
+  assert.equal(kinds.length, 7);
 });
 
 test('LeafClassification carries kind and optional reasons', () => {
@@ -111,4 +111,56 @@ test('measureToIR attaches classification to every leaf', () => {
     }
   }
   walk(ir.items);
+});
+
+test('text leaf with filter:blur → ImageFallback', () => {
+  const res = classifyLeaf({
+    type: 'text',
+    text: 'glowy',
+    rect: { x: 0, y: 0, w: 100, h: 30 },
+    color: '#000', fontSize: 16, fontFamily: 'sans-serif',
+    cssFeatureFlags: {
+      filter: 'blur(4px)', mask: '', clipPath: '',
+      mixBlendMode: '', transform: '', animationName: '',
+    },
+  });
+  assert.equal(res.kind, 'ImageFallback');
+  assert.ok(res.reasons.some((r) => r.startsWith('filter:')));
+});
+
+test('decor with clip-path → ImageFallback', () => {
+  const res = classifyLeaf({
+    type: 'decor',
+    rect: { x: 0, y: 0, w: 200, h: 100 },
+    background: '#fff', borderWidth: 0,
+    cssFeatureFlags: {
+      filter: '', mask: '', clipPath: 'circle(50%)',
+      mixBlendMode: '', transform: '', animationName: '',
+    },
+  });
+  assert.equal(res.kind, 'ImageFallback');
+  assert.ok(res.reasons.some((r) => r.startsWith('clip-path:')));
+});
+
+test('svg with complex <path> → ImageFallback', () => {
+  const res = classifyLeaf({
+    type: 'svg',
+    rect: { x: 0, y: 0, w: 200, h: 200 },
+    hasPath: true, hasUse: false, hasPattern: false, hasMask: false,
+  });
+  assert.equal(res.kind, 'ImageFallback');
+  assert.ok(res.reasons.some((r) => r.startsWith('svg:')));
+});
+
+test('text leaf with no feature flags still → TextRun', () => {
+  const res = classifyLeaf({
+    type: 'text',
+    text: 'plain', rect: { x: 0, y: 0, w: 100, h: 30 },
+    color: '#000', fontSize: 16, fontFamily: 'sans-serif',
+    cssFeatureFlags: {
+      filter: '', mask: '', clipPath: '',
+      mixBlendMode: '', transform: '', animationName: '',
+    },
+  });
+  assert.equal(res.kind, 'TextRun');
 });
