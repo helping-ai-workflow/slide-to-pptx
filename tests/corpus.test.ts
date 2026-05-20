@@ -21,19 +21,21 @@ test('CLI on minimal-deck writes pptx, snapshots, and fidelity report', async ()
 
   const snapshotDir = path.join(FIXTURE, 'minimal-deck.snapshots');
   assert.ok(existsSync(snapshotDir), 'snapshots dir missing');
-
-  const firstSnap = path.join(snapshotDir, '00-Title.png');
-  assert.ok(existsSync(firstSnap), `expected ${firstSnap}`);
+  assert.ok(existsSync(path.join(snapshotDir, '00-Title.png')));
+  assert.ok(existsSync(path.join(snapshotDir, '01-FilterPage.png')));
 
   const reportPath = path.join(FIXTURE, 'minimal-deck.fidelity.json');
   assert.ok(existsSync(reportPath), 'fidelity.json missing');
-
-  const raw = await readFile(reportPath, 'utf8');
-  const report = JSON.parse(raw);
+  const report = JSON.parse(await readFile(reportPath, 'utf8'));
 
   assert.equal(report.deck, 'minimal-deck');
-  assert.equal(report.pages, 1);
-  assert.ok(report.totalElements > 0, 'expected at least one classified leaf');
+  assert.equal(report.pages, 2);
+  assert.ok(report.totalElements > 0);
   assert.ok(typeof report.byKind === 'object');
-  assert.equal(report.editablePercent, 100);
+  assert.ok(report.editablePercent < 100, 'expected at least one ImageFallback to drop editable%');
+  assert.ok(report.fallbacks.length >= 1, 'expected at least one fallback entry');
+  assert.ok(
+    report.fallbacks.some((f: any) => f.reasons.some((r: string) => r.startsWith('filter:'))),
+    'expected a filter-driven fallback',
+  );
 });

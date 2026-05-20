@@ -98,6 +98,7 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
           ? 'mono' : 'body',
         align: isCenter ? 'center' : isRight ? 'right' : 'left',
         valign: 'top',
+        domLeafId: s.leafId,
         classification: classifyLeaf({
           type: 'text',
           text: s.text,
@@ -106,6 +107,7 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
           fontSize: s.fontSize,
           fontFamily: s.fontFamily,
         }),
+        fallbackImageDataUrl: s.fallbackImageDataUrl,
       } as IRRichText];
     }
     default:
@@ -133,6 +135,7 @@ function textLeafToRich(t: TextLeaf, id: string): IRRichText {
     align: (t.textAlign === 'center' || t.textAlign === 'right' || t.textAlign === 'left')
       ? (t.textAlign as any) : 'left',
     valign: 'top',
+    domLeafId: t.leafId,
     classification: classifyLeaf({
       type: 'text',
       text: t.text,
@@ -140,7 +143,9 @@ function textLeafToRich(t: TextLeaf, id: string): IRRichText {
       color: t.color,
       fontSize: t.fontSize,
       fontFamily: t.fontFamily,
+      cssFeatureFlags: t.cssFeatureFlags,
     }),
+    fallbackImageDataUrl: t.fallbackImageDataUrl,
   };
 }
 
@@ -182,12 +187,15 @@ export function measureToIR(m: PageMeasure): IRPage {
       borderRadii: d.borderRadii,
       boxShadow: d.boxShadow || undefined,
     };
+    decor.domLeafId = d.leafId;
     decor.classification = classifyLeaf({
       type: 'decor',
       rect: d.rect,
       background: d.background,
       borderWidth: d.borderWidth,
+      cssFeatureFlags: d.cssFeatureFlags,
     });
+    if (d.fallbackImageDataUrl) decor.fallbackImageDataUrl = d.fallbackImageDataUrl;
     push(d.groupId, decor);
   }
 
@@ -208,11 +216,13 @@ export function measureToIR(m: PageMeasure): IRPage {
       src: im.src,
       alt: im.alt,
     };
+    img.domLeafId = im.leafId;
     img.classification = classifyLeaf({
       type: 'image',
       rect: im.rect,
       src: im.src,
     });
+    if (im.fallbackImageDataUrl) img.fallbackImageDataUrl = im.fallbackImageDataUrl;
     push(im.groupId, img);
   }
 
@@ -226,19 +236,62 @@ export function measureToIR(m: PageMeasure): IRPage {
   }
 
   // 6) SVG primitives — emit one or more IR items, attribute to closest group.
+  // When a group of svgShapes share a leafId AND have a fallbackImageDataUrl,
+  // emit ONE Shape covering their union bbox classified as ImageFallback,
+  // not N tiny line-segment shapes each holding the same PNG.
   let svgN = 0;
+  // Pre-group by leafId so we can detect path-segment splits up front.
+  const svgByLeaf = new Map<string, typeof m.svgShapes>();
   for (const s of m.svgShapes) {
+    if (!svgByLeaf.has(s.leafId)) svgByLeaf.set(s.leafId, []);
+    svgByLeaf.get(s.leafId)!.push(s);
+  }
+  const handledLeafIds = new Set<string>();
+  for (const s of m.svgShapes) {
+    // If this leafId has a fallback image and we haven't handled it yet, emit
+    // a single ImageFallback covering the union bbox of all sibling segments
+    // and skip the rest of the group.
+    if (s.fallbackImageDataUrl && !handledLeafIds.has(s.leafId)) {
+      handledLeafIds.add(s.leafId);
+      const group = svgByLeaf.get(s.leafId)!;
+      const minX = Math.min(...group.map((g) => g.rect.x));
+      const minY = Math.min(...group.map((g) => g.rect.y));
+      const maxX = Math.max(...group.map((g) => g.rect.x + g.rect.w));
+      const maxY = Math.max(...group.map((g) => g.rect.y + g.rect.h));
+      const unionRect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      const fallback: IRShape = {
+        kind: 'Shape',
+        id: `svg-${svgN++}`,
+        shape: 'rect',
+        rect: unionRect,
+        domLeafId: s.leafId,
+        classification: classifyLeaf({
+          type: 'svg',
+          rect: unionRect,
+          hasPath: s.hasPath,
+          hasUse: s.hasUse,
+          hasPattern: s.hasPattern,
+          hasMask: s.hasMask,
+        }),
+        fallbackImageDataUrl: s.fallbackImageDataUrl,
+      };
+      push(s.groupId, fallback);
+      continue;
+    }
+    if (handledLeafIds.has(s.leafId)) continue;  // already emitted as fallback
     const items = svgToIR(s, `svg-${svgN++}`);
     for (const item of items) {
       if (item.kind === 'Shape') {
         item.classification = classifyLeaf({
           type: 'svg',
           rect: item.rect,
-          hasPath: false,
-          hasUse: false,
-          hasPattern: false,
-          hasMask: false,
+          hasPath: s.hasPath,
+          hasUse: s.hasUse,
+          hasPattern: s.hasPattern,
+          hasMask: s.hasMask,
         });
+        item.domLeafId = s.leafId;
+        if (s.fallbackImageDataUrl) item.fallbackImageDataUrl = s.fallbackImageDataUrl;
       }
       push(s.groupId, item);
     }

@@ -29,6 +29,8 @@ export type IRShape = {
   endArrow?: boolean;
   flipH?: boolean;
   flipV?: boolean;
+  domLeafId?: string;
+  fallbackImageDataUrl?: string;
   classification?: LeafClassification;
 };
 
@@ -41,6 +43,8 @@ export type IRRichText = {
   fontFamily?: 'mono' | 'body' | 'display';
   align?: 'left' | 'center' | 'right';
   valign?: 'top' | 'middle' | 'bottom';
+  domLeafId?: string;
+  fallbackImageDataUrl?: string;
   classification?: LeafClassification;
 };
 
@@ -50,6 +54,8 @@ export type IRImage = {
   rect: Rect;
   src: string;          // data: URL or filesystem path
   alt?: string;
+  domLeafId?: string;
+  fallbackImageDataUrl?: string;
   classification?: LeafClassification;
 };
 
@@ -62,6 +68,8 @@ export type IRDecorBox = {
   borderWidth: number;
   borderRadii: [number, number, number, number]; // tl, tr, br, bl
   boxShadow?: { offsetX: number; offsetY: number; blur: number; color: string };
+  domLeafId?: string;
+  fallbackImageDataUrl?: string;
   classification?: LeafClassification;
 };
 
@@ -83,7 +91,8 @@ export type NativeKind =
   | 'Box'
   | 'Line'
   | 'Table'
-  | 'SvgIcon';
+  | 'SvgIcon'
+  | 'ImageFallback';
 
 export type LeafClassification = {
   kind: NativeKind;

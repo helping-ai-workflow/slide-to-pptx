@@ -1,9 +1,14 @@
 import type { LeafClassification, NativeKind } from './types.js';
 
+export type ClassifiedLeaf = {
+  classification: LeafClassification;
+  leafId: string;
+};
+
 export type PageClassificationSummary = {
   pageIndex: number;
   pageName: string;
-  classifications: LeafClassification[];
+  classifications: ClassifiedLeaf[];
 };
 
 export type FidelityReportInput = {
@@ -11,29 +16,45 @@ export type FidelityReportInput = {
   pages: PageClassificationSummary[];
 };
 
+export type FallbackEntry = {
+  pageIndex: number;
+  pageName: string;
+  leafId: string;
+  reasons: string[];
+};
+
 export type FidelityReport = {
   deck: string;
   pages: number;
   totalElements: number;
-  // Per-kind tallies. Kinds not seen on the deck are absent (not zeroed)
-  // so the JSON sidecar stays human-skimmable.
   byKind: Partial<Record<NativeKind, number>>;
   editablePercent: number;
-  generatedAt: string; // ISO-8601, fixed precision (no millis) for diffability.
+  fallbacks: FallbackEntry[];
+  generatedAt: string;
 };
 
 export function buildFidelityReport(input: FidelityReportInput): FidelityReport {
   const byKind: Partial<Record<NativeKind, number>> = {};
+  const fallbacks: FallbackEntry[] = [];
   let total = 0;
   for (const p of input.pages) {
-    for (const c of p.classifications) {
-      byKind[c.kind] = (byKind[c.kind] ?? 0) + 1;
+    for (const cl of p.classifications) {
+      byKind[cl.classification.kind] = (byKind[cl.classification.kind] ?? 0) + 1;
       total += 1;
+      if (cl.classification.kind === 'ImageFallback') {
+        fallbacks.push({
+          pageIndex: p.pageIndex,
+          pageName: p.pageName,
+          leafId: cl.leafId,
+          reasons: cl.classification.reasons,
+        });
+      }
     }
   }
-  // Plan A: classifier never falls back. Every classified leaf is editable.
-  // Plan B will subtract the image-fallback share.
-  const editablePercent = total === 0 ? 100 : 100;
+  const fallbackCount = byKind.ImageFallback ?? 0;
+  const editablePercent = total === 0
+    ? 100
+    : Math.round(((total - fallbackCount) / total) * 1000) / 10;
   const generatedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   return {
     deck: input.deck,
@@ -41,6 +62,7 @@ export function buildFidelityReport(input: FidelityReportInput): FidelityReport 
     totalElements: total,
     byKind,
     editablePercent,
+    fallbacks,
     generatedAt,
   };
 }

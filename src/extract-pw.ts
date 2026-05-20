@@ -6,6 +6,15 @@ import type { PrimRecord } from './instrument.js';
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
+export type CssFeatureFlags = {
+  filter: string;        // e.g. 'blur(8px)' | ''
+  mask: string;          // computed mask-image when not 'none'
+  clipPath: string;      // computed clip-path when not 'none'
+  mixBlendMode: string;  // when not 'normal'
+  transform: string;     // when not 'none' AND not a translate/rotate-only matrix
+  animationName: string; // when not 'none' — recorded for reference only
+};
+
 export type PrimMeasure = {
   id: string;
   name: string;
@@ -28,7 +37,10 @@ export type TextLeaf = {
   borderRadius: number;
   textAlign: string;
   padding: { t: number; r: number; b: number; l: number };
+  cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
+  leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type ImageLeaf = {
@@ -36,6 +48,8 @@ export type ImageLeaf = {
   src: string;
   alt?: string;
   groupId: string | null;     // NEW
+  leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type DecorBox = {
@@ -45,7 +59,10 @@ export type DecorBox = {
   borderWidth: number;
   borderRadii: [number, number, number, number];
   boxShadow: { offsetX: number; offsetY: number; blur: number; color: string } | null;
+  cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
+  leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type SvgShape = {
@@ -63,7 +80,16 @@ export type SvgShape = {
   fontSize: number;
   fontFamily: string;
   textAnchor: string;
+  // Structural flags for the classifier. `hasPath` is set when the parent SVG
+  // contains at least one <path d="..."> element; same for the others. These
+  // are computed once per <svg> root and propagated to every shape it contains.
+  hasPath: boolean;
+  hasUse: boolean;
+  hasPattern: boolean;
+  hasMask: boolean;
   groupId: string | null;
+  leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type PageMeasure = {
@@ -123,22 +149,23 @@ const EXTRACT_SCRIPT = `(() => {
     let n; while ((n = walker.nextNode())) inPrim.add(n);
   }
 
-  const images = [];
-  for (const img of document.querySelectorAll('img')) {
-    // Use the positioned wrapper as the rect so an image with objectFit:contain
-    // shrinking inside a 540x700 panel still fills the panel in pptx.
-    // Note: do NOT skip imgs inside primitives — every component is tagged
-    // as a primitive, so skipping would drop all <img> elements (logos,
-    // illustrations) that live inside any React component.
-    const wrapper = img.parentElement;
-    const rect = wrapper ? pickRect(wrapper) : pickRect(img);
-    images.push({
-      rect,
-      src: img.getAttribute('src') || '',
-      alt: img.getAttribute('alt') || '',
-      groupId: img.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
-    });
-  }
+  // IMPORTANT: leafIdOf must be defined before the images loop (and any other
+  // loop that calls it) — 'const' is not hoisted, so calling it before its
+  // declaration throws a TDZ ReferenceError when the script is eval-ed.
+  const leafIdOf = (el) => {
+    const prim = el.closest('[data-prim-id]');
+    const primId = prim?.getAttribute('data-prim-id') || 'root';
+    const path = [];
+    let cur = el;
+    while (cur && cur !== prim && cur.parentElement) {
+      const sibs = Array.from(cur.parentElement.children);
+      path.unshift(sibs.indexOf(cur));
+      cur = cur.parentElement;
+    }
+    const id = path.length === 0 ? primId : primId + ':' + path.join('.');
+    if (!el.getAttribute('data-leaf-id')) el.setAttribute('data-leaf-id', id);
+    return id;
+  };
 
   const trim = (s) => (s || '').replace(/\\s+/g, ' ').trim();
   const parseColor = (s) => {
@@ -159,6 +186,46 @@ const EXTRACT_SCRIPT = `(() => {
     return toHex(c.a < 1 ? blendOver(c) : c);
   };
   const parsePx = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+  const images = [];
+  for (const img of document.querySelectorAll('img')) {
+    // Use the positioned wrapper as the rect so an image with objectFit:contain
+    // shrinking inside a 540x700 panel still fills the panel in pptx.
+    // Note: do NOT skip imgs inside primitives — every component is tagged
+    // as a primitive, so skipping would drop all <img> elements (logos,
+    // illustrations) that live inside any React component.
+    const wrapper = img.parentElement;
+    const rect = wrapper ? pickRect(wrapper) : pickRect(img);
+    images.push({
+      rect,
+      src: img.getAttribute('src') || '',
+      alt: img.getAttribute('alt') || '',
+      leafId: leafIdOf(img),
+      groupId: img.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
+    });
+  }
+
+  const isTrivialTransform = (t) => {
+    if (!t || t === 'none') return true;
+    const m = /^matrix\\(([^)]+)\\)/.exec(t);
+    if (m) {
+      const v = m[1].split(',').map((s) => parseFloat(s.trim()));
+      if (v.length === 6) {
+        const [a, b, c, d] = v;
+        const isPureRotate = Math.abs(a*a + b*b - 1) < 1e-3 && Math.abs(c*c + d*d - 1) < 1e-3;
+        return isPureRotate;
+      }
+    }
+    return false;
+  };
+  const buildCssFeatureFlags = (cs) => ({
+    filter: cs.filter && cs.filter !== 'none' ? cs.filter : '',
+    mask: cs.mask && cs.mask !== 'none' ? cs.mask : '',
+    clipPath: cs.clipPath && cs.clipPath !== 'none' ? cs.clipPath : '',
+    mixBlendMode: cs.mixBlendMode && cs.mixBlendMode !== 'normal' ? cs.mixBlendMode : '',
+    transform: isTrivialTransform(cs.transform) ? '' : cs.transform,
+    animationName: cs.animationName && cs.animationName !== 'none' ? cs.animationName : '',
+  });
 
   const INLINE_TAGS = new Set(['SPAN','EM','STRONG','B','I','A','CODE','SUP','SUB','MARK','U','SMALL','KBD','SAMP','VAR','BR','WBR','NOBR']);
 
@@ -289,6 +356,8 @@ const EXTRACT_SCRIPT = `(() => {
             b: parsePx(ccs.paddingBottom),
             l: parsePx(ccs.paddingLeft),
           },
+          cssFeatureFlags: buildCssFeatureFlags(ccs),
+          leafId: leafIdOf(c),
           groupId: c.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
         });
       }
@@ -329,6 +398,8 @@ const EXTRACT_SCRIPT = `(() => {
         b: parsePx(cs.paddingBottom),
         l: parsePx(cs.paddingLeft),
       },
+      cssFeatureFlags: buildCssFeatureFlags(cs),
+      leafId: leafIdOf(el),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
@@ -388,13 +459,15 @@ const EXTRACT_SCRIPT = `(() => {
           color: colorMatch ? colorRgbToHex(colorMatch[0]) : '#000000',
         };
       })(),
+      cssFeatureFlags: buildCssFeatureFlags(cs),
+      leafId: leafIdOf(el),
       groupId,
     });
 
     if (anyBorder && !uniform) {
       // Emit each non-zero side as a synthetic line shape so non-uniform
       // borders survive (table row separators, single-side accents, etc).
-      const pushLine = (x1, y1, x2, y2, w, c) => {
+      const pushLine = (x1, y1, x2, y2, w, c, side) => {
         borderLines.push({
           tag: 'line',
           rect: {
@@ -405,13 +478,15 @@ const EXTRACT_SCRIPT = `(() => {
           rx: 0, x1, y1, x2, y2, points: '',
           markerEnd: '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+          hasPath: false, hasUse: false, hasPattern: false, hasMask: false,
+          leafId: leafIdOf(el) + ':b' + side,
           groupId,
         });
       };
-      if (sides.t.w > 0) pushLine(rect.x, rect.y, rect.x + rect.w, rect.y, sides.t.w, sides.t.c);
-      if (sides.r.w > 0) pushLine(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + rect.h, sides.r.w, sides.r.c);
-      if (sides.b.w > 0) pushLine(rect.x, rect.y + rect.h, rect.x + rect.w, rect.y + rect.h, sides.b.w, sides.b.c);
-      if (sides.l.w > 0) pushLine(rect.x, rect.y, rect.x, rect.y + rect.h, sides.l.w, sides.l.c);
+      if (sides.t.w > 0) pushLine(rect.x, rect.y, rect.x + rect.w, rect.y, sides.t.w, sides.t.c, 't');
+      if (sides.r.w > 0) pushLine(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + rect.h, sides.r.w, sides.r.c, 'r');
+      if (sides.b.w > 0) pushLine(rect.x, rect.y + rect.h, rect.x + rect.w, rect.y + rect.h, sides.b.w, sides.b.c, 'b');
+      if (sides.l.w > 0) pushLine(rect.x, rect.y, rect.x, rect.y + rect.h, sides.l.w, sides.l.c, 'l');
     }
   }
 
@@ -490,6 +565,15 @@ const EXTRACT_SCRIPT = `(() => {
 
   const svgShapes = [];
   const SVG_TAGS = new Set(['rect','line','polyline','circle','ellipse','text','path']);
+  const svgRootFlags = new WeakMap();
+  for (const svg of document.querySelectorAll('svg')) {
+    svgRootFlags.set(svg, {
+      hasPath:    !!svg.querySelector('path'),
+      hasUse:     !!svg.querySelector('use'),
+      hasPattern: !!svg.querySelector('pattern'),
+      hasMask:    !!svg.querySelector('mask'),
+    });
+  }
   for (const el of document.querySelectorAll('svg *')) {
     const tag = el.tagName.toLowerCase();
     if (!SVG_TAGS.has(tag)) continue;
@@ -524,6 +608,8 @@ const EXTRACT_SCRIPT = `(() => {
           points: '',
           markerEnd: k === segs.length - 1 ? me : '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+          ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+          leafId: leafIdOf(el),
           groupId: gid,
         });
       }
@@ -565,6 +651,8 @@ const EXTRACT_SCRIPT = `(() => {
       fontSize: parsePx(cs.fontSize),
       fontFamily: cs.fontFamily || '',
       textAnchor: el.getAttribute('text-anchor') || 'start',
+      ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+      leafId: leafIdOf(el),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
@@ -651,6 +739,68 @@ export async function measureSlide(
           parentId: entry.parentId,
         } as PrimMeasure;
       });
+      // Element-screenshot pass: any leaf that the classifier promotes to
+      // ImageFallback needs a pixel rendering to embed in the pptx.
+      const { classifyLeaf } = await import('./classifier.js');
+      const leavesToFallback: Array<{ kind: 'text' | 'decor' | 'svg'; leafId: string; index: number }> = [];
+      r.texts.forEach((t, i) => {
+        const c = classifyLeaf({
+          type: 'text',
+          text: t.text,
+          rect: t.rect,
+          color: t.color,
+          fontSize: t.fontSize,
+          fontFamily: t.fontFamily,
+          cssFeatureFlags: t.cssFeatureFlags,
+        });
+        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'text', leafId: t.leafId, index: i });
+      });
+      r.decors.forEach((d, i) => {
+        const c = classifyLeaf({
+          type: 'decor',
+          rect: d.rect,
+          background: d.background,
+          borderWidth: d.borderWidth,
+          cssFeatureFlags: d.cssFeatureFlags,
+        });
+        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'decor', leafId: d.leafId, index: i });
+      });
+      r.svgShapes.forEach((s, i) => {
+        const c = classifyLeaf({
+          type: 'svg',
+          rect: s.rect,
+          hasPath: s.hasPath,
+          hasUse: s.hasUse,
+          hasPattern: s.hasPattern,
+          hasMask: s.hasMask,
+        });
+        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'svg', leafId: s.leafId, index: i });
+      });
+
+      // De-dupe by leafId so when an SVG produces multiple shapes we only
+      // screenshot the host element once and attach the PNG to all of them.
+      const seenLeafIds = new Map<string, string>();
+      for (const f of leavesToFallback) {
+        if (seenLeafIds.has(f.leafId)) continue;
+        const locator = page.locator(`[data-leaf-id="${f.leafId.replace(/"/g, '\\"')}"]`);
+        try {
+          const buf = await locator.first().screenshot({ omitBackground: true, type: 'png' });
+          seenLeafIds.set(f.leafId, `data:image/png;base64,${buf.toString('base64')}`);
+        } catch {
+          // Element not located (rare — usually means it was tagged but is
+          // off-screen or hidden). Skip; the leaf will keep its classification
+          // but no fallback image, and pptx-build will fall through to the
+          // native emission path (Plan A behaviour).
+        }
+      }
+      for (const f of leavesToFallback) {
+        const url = seenLeafIds.get(f.leafId);
+        if (!url) continue;
+        if (f.kind === 'text') r.texts[f.index].fallbackImageDataUrl = url;
+        else if (f.kind === 'decor') r.decors[f.index].fallbackImageDataUrl = url;
+        else if (f.kind === 'svg') r.svgShapes[f.index].fallbackImageDataUrl = url;
+      }
+
       out.push({
         pageIndex: p.pageIndex,
         pageName: p.pageName,
