@@ -212,3 +212,29 @@ test('measureToIR threads fallbackImageDataUrl through to IR', () => {
   walk(ir.items);
   assert.ok(found, 'expected Decor leaf to carry fallbackImageDataUrl');
 });
+
+test('text with filter:blur(0px) (no-op) stays TextRun', () => {
+  const res = classifyLeaf({
+    type: 'text',
+    text: 'crisp', rect: { x: 0, y: 0, w: 100, h: 30 },
+    color: '#000', fontSize: 16, fontFamily: 'sans-serif',
+    cssFeatureFlags: {
+      filter: 'blur(0px)', mask: '', clipPath: '',
+      mixBlendMode: '', transform: '', animationName: '',
+    },
+  });
+  assert.equal(res.kind, 'TextRun');
+});
+
+test('text with filter:opacity(1) (no-op) stays TextRun', () => {
+  const res = classifyLeaf({
+    type: 'text',
+    text: 'visible', rect: { x: 0, y: 0, w: 100, h: 30 },
+    color: '#000', fontSize: 16, fontFamily: 'sans-serif',
+    cssFeatureFlags: {
+      filter: 'opacity(1)', mask: '', clipPath: '',
+      mixBlendMode: '', transform: '', animationName: '',
+    },
+  });
+  assert.equal(res.kind, 'TextRun');
+});

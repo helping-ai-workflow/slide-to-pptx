@@ -73,7 +73,7 @@ const SVG_ICON_MAX_DIM = 64;
 function unsupportedCssReasons(flags?: CssFeatureFlags): string[] {
   if (!flags) return [];
   const out: string[] = [];
-  if (flags.filter)       out.push(`filter:${flags.filter}`);
+  if (flags.filter && !isNoOpFilter(flags.filter)) out.push(`filter:${flags.filter}`);
   if (flags.mask)         out.push(`mask:${flags.mask}`);
   if (flags.clipPath)     out.push(`clip-path:${flags.clipPath}`);
   if (flags.mixBlendMode) out.push(`mix-blend-mode:${flags.mixBlendMode}`);
@@ -82,6 +82,28 @@ function unsupportedCssReasons(flags?: CssFeatureFlags): string[] {
   // because Plan A's animation-freeze in extract-pw already captures the
   // final visual state.
   return out;
+}
+
+// CSS filter values that are visually a no-op and should NOT trigger
+// ImageFallback. The browser still resolves these to a non-empty
+// computed-style string when the author writes `filter: blur(0px)` for
+// hover-state transitions, etc. — but the rendered pixels are identical
+// to having no filter at all, so falling back to a screenshot is waste.
+function isNoOpFilter(value: string): boolean {
+  const parts = value.trim().split(/\s+/);
+  for (const p of parts) {
+    if (p === 'none') continue;
+    const m = /^([a-z-]+)\(([^)]*)\)$/i.exec(p);
+    if (!m) return false; // Unknown shape — treat as effectful, safer.
+    const name = m[1].toLowerCase();
+    const arg = m[2].trim();
+    if (name === 'blur' && /^0(px|em|rem|%)?$/.test(arg)) continue;
+    if ((name === 'opacity' || name === 'brightness' || name === 'contrast' || name === 'saturate') && /^1(\.0+)?$/.test(arg)) continue;
+    if ((name === 'grayscale' || name === 'invert' || name === 'sepia') && /^0(\.0+)?(%)?$/.test(arg)) continue;
+    if (name === 'hue-rotate' && /^0(\.0+)?(deg|rad|grad|turn)?$/.test(arg)) continue;
+    return false;
+  }
+  return true;
 }
 
 export function classifyLeaf(input: ClassifierInput): LeafClassification {
