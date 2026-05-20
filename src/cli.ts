@@ -7,7 +7,8 @@ import { measureSlide } from './extract-pw.js';
 import { measureToIR } from './measure-to-ir.js';
 import { buildPptx } from './pptx-build.js';
 import { postprocessPptx } from './pptx-postprocess.js';
-import type { IRPage } from './types.js';
+import { buildFidelityReport, type PageClassificationSummary } from './fidelity-report.js';
+import type { IRItem, IRPage } from './types.js';
 
 async function readPackageVersion(): Promise<string> {
   // package.json sits one directory above the built/transpiled cli.js
@@ -126,6 +127,15 @@ function safeName(s: string): string {
   return s.replace(/[^\w.-]+/g, '_').replace(/^\.+/, '_').slice(0, 120) || '_';
 }
 
+function collectClassifications(items: IRItem[]): PageClassificationSummary['classifications'] {
+  const out: PageClassificationSummary['classifications'] = [];
+  for (const it of items) {
+    if (it.kind === 'Group') { out.push(...collectClassifications(it.children)); continue; }
+    if (it.classification) out.push(it.classification);
+  }
+  return out;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('-v') || argv.includes('--version')) {
@@ -186,6 +196,18 @@ async function main() {
   const pptxPath = path.join(opts.outDir, pptxName);
   await buildPptx(pages, pptxPath, opts.slideDir, design);
   await postprocessPptx(pptxPath);
+  const summaries: PageClassificationSummary[] = pages.map((p) => ({
+    pageIndex: p.pageIndex,
+    pageName: p.pageName,
+    classifications: collectClassifications(p.items),
+  }));
+  const report = buildFidelityReport({
+    deck: path.basename(opts.slideDir),
+    pages: summaries,
+  });
+  const reportPath = path.join(opts.outDir, `${safeName(path.basename(opts.slideDir))}.fidelity.json`);
+  await writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8');
+  info(`FIDELITY written: ${reportPath}`);
   info(`PPTX written: ${pptxPath}`);
 }
 

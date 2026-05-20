@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -23,4 +24,19 @@ test('CLI on minimal-deck writes pptx + snapshots', () => {
 
   const firstSnap = path.join(snapshotDir, '00-Title.png');
   assert.ok(existsSync(firstSnap), `expected ${firstSnap}`);
+});
+
+test('CLI on minimal-deck writes a well-formed fidelity report', async () => {
+  // The previous test already ran the CLI. Reuse its output.
+  const reportPath = path.join(FIXTURE, 'minimal-deck.fidelity.json');
+  assert.ok(existsSync(reportPath), 'fidelity.json missing');
+
+  const raw = await readFile(reportPath, 'utf8');
+  const report = JSON.parse(raw);
+
+  assert.equal(report.deck, 'minimal-deck');
+  assert.equal(report.pages, 1);
+  assert.ok(report.totalElements > 0, 'expected at least one classified leaf');
+  assert.ok(typeof report.byKind === 'object');
+  assert.equal(report.editablePercent, 100);
 });

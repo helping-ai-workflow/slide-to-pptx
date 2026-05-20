@@ -1,3 +1,4 @@
+import React from 'react';
 import type { DesignSystem, Page } from '@open-slide/core';
 
 export const design: DesignSystem = {
