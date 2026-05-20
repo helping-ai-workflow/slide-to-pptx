@@ -40,6 +40,7 @@ export type TextLeaf = {
   cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
   leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type ImageLeaf = {
@@ -48,6 +49,7 @@ export type ImageLeaf = {
   alt?: string;
   groupId: string | null;     // NEW
   leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type DecorBox = {
@@ -60,6 +62,7 @@ export type DecorBox = {
   cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
   leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type SvgShape = {
@@ -86,6 +89,7 @@ export type SvgShape = {
   hasMask: boolean;
   groupId: string | null;
   leafId: string;
+  fallbackImageDataUrl?: string;
 };
 
 export type PageMeasure = {
@@ -732,6 +736,68 @@ export async function measureSlide(
           parentId: entry.parentId,
         } as PrimMeasure;
       });
+      // Element-screenshot pass: any leaf that the classifier promotes to
+      // ImageFallback needs a pixel rendering to embed in the pptx.
+      const { classifyLeaf } = await import('./classifier.js');
+      const leavesToFallback: Array<{ kind: 'text' | 'decor' | 'svg'; leafId: string; index: number }> = [];
+      r.texts.forEach((t, i) => {
+        const c = classifyLeaf({
+          type: 'text',
+          text: t.text,
+          rect: t.rect,
+          color: t.color,
+          fontSize: t.fontSize,
+          fontFamily: t.fontFamily,
+          cssFeatureFlags: t.cssFeatureFlags,
+        });
+        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'text', leafId: t.leafId, index: i });
+      });
+      r.decors.forEach((d, i) => {
+        const c = classifyLeaf({
+          type: 'decor',
+          rect: d.rect,
+          background: d.background,
+          borderWidth: d.borderWidth,
+          cssFeatureFlags: d.cssFeatureFlags,
+        });
+        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'decor', leafId: d.leafId, index: i });
+      });
+      r.svgShapes.forEach((s, i) => {
+        const c = classifyLeaf({
+          type: 'svg',
+          rect: s.rect,
+          hasPath: s.hasPath,
+          hasUse: s.hasUse,
+          hasPattern: s.hasPattern,
+          hasMask: s.hasMask,
+        });
+        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'svg', leafId: s.leafId, index: i });
+      });
+
+      // De-dupe by leafId so when an SVG produces multiple shapes we only
+      // screenshot the host element once and attach the PNG to all of them.
+      const seenLeafIds = new Map<string, string>();
+      for (const f of leavesToFallback) {
+        if (seenLeafIds.has(f.leafId)) continue;
+        const locator = page.locator(`[data-leaf-id="${f.leafId.replace(/"/g, '\\"')}"]`);
+        try {
+          const buf = await locator.first().screenshot({ omitBackground: true, type: 'png' });
+          seenLeafIds.set(f.leafId, `data:image/png;base64,${buf.toString('base64')}`);
+        } catch {
+          // Element not located (rare — usually means it was tagged but is
+          // off-screen or hidden). Skip; the leaf will keep its classification
+          // but no fallback image, and pptx-build will fall through to the
+          // native emission path (Plan A behaviour).
+        }
+      }
+      for (const f of leavesToFallback) {
+        const url = seenLeafIds.get(f.leafId);
+        if (!url) continue;
+        if (f.kind === 'text') r.texts[f.index].fallbackImageDataUrl = url;
+        else if (f.kind === 'decor') r.decors[f.index].fallbackImageDataUrl = url;
+        else if (f.kind === 'svg') r.svgShapes[f.index].fallbackImageDataUrl = url;
+      }
+
       out.push({
         pageIndex: p.pageIndex,
         pageName: p.pageName,
