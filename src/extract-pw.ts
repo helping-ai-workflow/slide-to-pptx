@@ -39,6 +39,7 @@ export type TextLeaf = {
   padding: { t: number; r: number; b: number; l: number };
   cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
+  leafId: string;
 };
 
 export type ImageLeaf = {
@@ -46,6 +47,7 @@ export type ImageLeaf = {
   src: string;
   alt?: string;
   groupId: string | null;     // NEW
+  leafId: string;
 };
 
 export type DecorBox = {
@@ -57,6 +59,7 @@ export type DecorBox = {
   boxShadow: { offsetX: number; offsetY: number; blur: number; color: string } | null;
   cssFeatureFlags: CssFeatureFlags;
   groupId: string | null;     // NEW
+  leafId: string;
 };
 
 export type SvgShape = {
@@ -82,6 +85,7 @@ export type SvgShape = {
   hasPattern: boolean;
   hasMask: boolean;
   groupId: string | null;
+  leafId: string;
 };
 
 export type PageMeasure = {
@@ -154,6 +158,7 @@ const EXTRACT_SCRIPT = `(() => {
       rect,
       src: img.getAttribute('src') || '',
       alt: img.getAttribute('alt') || '',
+      leafId: leafIdOf(img),
       groupId: img.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
@@ -177,6 +182,21 @@ const EXTRACT_SCRIPT = `(() => {
     return toHex(c.a < 1 ? blendOver(c) : c);
   };
   const parsePx = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+  const leafIdOf = (el) => {
+    const prim = el.closest('[data-prim-id]');
+    const primId = prim?.getAttribute('data-prim-id') || 'root';
+    const path = [];
+    let cur = el;
+    while (cur && cur !== prim && cur.parentElement) {
+      const sibs = Array.from(cur.parentElement.children);
+      path.unshift(sibs.indexOf(cur));
+      cur = cur.parentElement;
+    }
+    const id = path.length === 0 ? primId : primId + ':' + path.join('.');
+    if (!el.getAttribute('data-leaf-id')) el.setAttribute('data-leaf-id', id);
+    return id;
+  };
 
   const isTrivialTransform = (t) => {
     if (!t || t === 'none') return true;
@@ -330,6 +350,7 @@ const EXTRACT_SCRIPT = `(() => {
             l: parsePx(ccs.paddingLeft),
           },
           cssFeatureFlags: buildCssFeatureFlags(ccs),
+          leafId: leafIdOf(c),
           groupId: c.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
         });
       }
@@ -371,6 +392,7 @@ const EXTRACT_SCRIPT = `(() => {
         l: parsePx(cs.paddingLeft),
       },
       cssFeatureFlags: buildCssFeatureFlags(cs),
+      leafId: leafIdOf(el),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
@@ -431,13 +453,14 @@ const EXTRACT_SCRIPT = `(() => {
         };
       })(),
       cssFeatureFlags: buildCssFeatureFlags(cs),
+      leafId: leafIdOf(el),
       groupId,
     });
 
     if (anyBorder && !uniform) {
       // Emit each non-zero side as a synthetic line shape so non-uniform
       // borders survive (table row separators, single-side accents, etc).
-      const pushLine = (x1, y1, x2, y2, w, c) => {
+      const pushLine = (x1, y1, x2, y2, w, c, side) => {
         borderLines.push({
           tag: 'line',
           rect: {
@@ -449,13 +472,14 @@ const EXTRACT_SCRIPT = `(() => {
           markerEnd: '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
           hasPath: false, hasUse: false, hasPattern: false, hasMask: false,
+          leafId: leafIdOf(el) + ':b' + side,
           groupId,
         });
       };
-      if (sides.t.w > 0) pushLine(rect.x, rect.y, rect.x + rect.w, rect.y, sides.t.w, sides.t.c);
-      if (sides.r.w > 0) pushLine(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + rect.h, sides.r.w, sides.r.c);
-      if (sides.b.w > 0) pushLine(rect.x, rect.y + rect.h, rect.x + rect.w, rect.y + rect.h, sides.b.w, sides.b.c);
-      if (sides.l.w > 0) pushLine(rect.x, rect.y, rect.x, rect.y + rect.h, sides.l.w, sides.l.c);
+      if (sides.t.w > 0) pushLine(rect.x, rect.y, rect.x + rect.w, rect.y, sides.t.w, sides.t.c, 't');
+      if (sides.r.w > 0) pushLine(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + rect.h, sides.r.w, sides.r.c, 'r');
+      if (sides.b.w > 0) pushLine(rect.x, rect.y + rect.h, rect.x + rect.w, rect.y + rect.h, sides.b.w, sides.b.c, 'b');
+      if (sides.l.w > 0) pushLine(rect.x, rect.y, rect.x, rect.y + rect.h, sides.l.w, sides.l.c, 'l');
     }
   }
 
@@ -578,6 +602,7 @@ const EXTRACT_SCRIPT = `(() => {
           markerEnd: k === segs.length - 1 ? me : '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
           ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+          leafId: leafIdOf(el),
           groupId: gid,
         });
       }
@@ -620,6 +645,7 @@ const EXTRACT_SCRIPT = `(() => {
       fontFamily: cs.fontFamily || '',
       textAnchor: el.getAttribute('text-anchor') || 'start',
       ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+      leafId: leafIdOf(el),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
   }
