@@ -132,7 +132,11 @@ function collectClassifications(items: IRItem[]): PageClassificationSummary['cla
   for (const it of items) {
     if (it.kind === 'Group') { out.push(...collectClassifications(it.children)); continue; }
     if (it.classification) {
-      out.push({ leafId: it.id, classification: it.classification });
+      // Prefer the stable DOM data-leaf-id when available; fall back to the
+      // IR id for sites that don't have one (e.g., SVG segments synthesised
+      // from path parsing).
+      const leafId = ((it as any).domLeafId as string | undefined) ?? it.id;
+      out.push({ leafId, classification: it.classification });
     }
   }
   return out;
