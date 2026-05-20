@@ -7,7 +7,8 @@ import { measureSlide } from './extract-pw.js';
 import { measureToIR } from './measure-to-ir.js';
 import { buildPptx } from './pptx-build.js';
 import { postprocessPptx } from './pptx-postprocess.js';
-import type { IRPage } from './types.js';
+import { buildFidelityReport, type PageClassificationSummary } from './fidelity-report.js';
+import type { IRItem, IRPage } from './types.js';
 
 async function readPackageVersion(): Promise<string> {
   // package.json sits one directory above the built/transpiled cli.js
@@ -40,6 +41,8 @@ options:
   --ir              also write IR JSON sidecars next to the pptx
   --ir-only         write IR JSON only, skip pptx
   --html            dump per-page HTML for debugging, skip pptx
+  --snapshots       write HTML-render PNGs next to pptx (default on)
+  --no-snapshots    suppress snapshot sidecars
   -q, --quiet       suppress progress output (errors still go to stderr)
   -v, --version     print version and exit
   -h, --help        show this help`);
@@ -53,6 +56,7 @@ type Opts = {
   irOnly: boolean;
   htmlOnly: boolean;
   quiet: boolean;
+  snapshots: boolean;
 };
 
 function parseArgs(argv: string[]): Opts | null {
@@ -63,6 +67,7 @@ function parseArgs(argv: string[]): Opts | null {
   let irOnly = false;
   let htmlOnly = false;
   let quiet = false;
+  let snapshots = true;
 
   const takeValue = (flag: string, i: number): string | null => {
     const next = argv[i + 1];
@@ -88,6 +93,8 @@ function parseArgs(argv: string[]): Opts | null {
     if (a === '--ir-only')   { irOnly = true; continue; }
     if (a === '--html')      { htmlOnly = true; continue; }
     if (a === '-q' || a === '--quiet') { quiet = true; continue; }
+    if (a === '--snapshots')    { snapshots = true; continue; }
+    if (a === '--no-snapshots') { snapshots = false; continue; }
     if (a.startsWith('-')) {
       console.error(`unknown option: ${a}`);
       return null;
@@ -108,6 +115,7 @@ function parseArgs(argv: string[]): Opts | null {
     irOnly,
     htmlOnly,
     quiet,
+    snapshots,
   };
 }
 
@@ -117,6 +125,15 @@ function parseArgs(argv: string[]): Opts | null {
 // chars, dots, and hyphens; collapse runs of replacements.
 function safeName(s: string): string {
   return s.replace(/[^\w.-]+/g, '_').replace(/^\.+/, '_').slice(0, 120) || '_';
+}
+
+function collectClassifications(items: IRItem[]): PageClassificationSummary['classifications'] {
+  const out: PageClassificationSummary['classifications'] = [];
+  for (const it of items) {
+    if (it.kind === 'Group') { out.push(...collectClassifications(it.children)); continue; }
+    if (it.classification) out.push(it.classification);
+  }
+  return out;
 }
 
 async function main() {
@@ -155,7 +172,11 @@ async function main() {
     process.exit(1);
   }
 
-  const measures = await measureSlide(selected);
+  const deckBase = safeName(path.basename(opts.slideDir));
+  const snapshotDir = opts.snapshots
+    ? path.join(opts.outDir, `${deckBase}.snapshots`)
+    : undefined;
+  const measures = await measureSlide(selected, { snapshotDir });
   const pages: IRPage[] = measures.map(measureToIR);
 
   if (opts.emitIR || opts.irOnly) {
@@ -175,6 +196,18 @@ async function main() {
   const pptxPath = path.join(opts.outDir, pptxName);
   await buildPptx(pages, pptxPath, opts.slideDir, design);
   await postprocessPptx(pptxPath);
+  const summaries: PageClassificationSummary[] = pages.map((p) => ({
+    pageIndex: p.pageIndex,
+    pageName: p.pageName,
+    classifications: collectClassifications(p.items),
+  }));
+  const report = buildFidelityReport({
+    deck: path.basename(opts.slideDir),
+    pages: summaries,
+  });
+  const reportPath = path.join(opts.outDir, `${safeName(path.basename(opts.slideDir))}.fidelity.json`);
+  await writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8');
+  info(`FIDELITY written: ${reportPath}`);
   info(`PPTX written: ${pptxPath}`);
 }
 
