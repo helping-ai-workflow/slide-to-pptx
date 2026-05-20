@@ -496,7 +496,7 @@ const EXTRACT_SCRIPT = `(() => {
   // Anything outside this set (typically 'A' for arcs, 'S'/'T' for smooth
   // bezier shortcuts) cannot be rendered natively and triggers image
   // fallback at the classifier.
-  const SUPPORTED_PATH_CMDS = new Set(['M','L','H','V','C','Q','Z','m','l','h','v','c','q','z']);
+  const SUPPORTED_PATH_CMDS = new Set(['M','L','H','V','C','Q','S','T','A','Z','m','l','h','v','c','q','s','t','a','z']);
   const hasUnsupportedPathCommand = (d) => {
     if (!d) return false;
     const cmds = d.match(/[a-zA-Z]/g);
@@ -506,7 +506,11 @@ const EXTRACT_SCRIPT = `(() => {
   };
 
   // Parse an SVG <path d="..."> into screen-space line segments.
-  // Supports M/L/H/V/C/Q/Z (abs + rel). S/T/A skipped — uncommon for our decks.
+  // Supports M/L/H/V/C/Q/S/T/A/Z (abs + rel). A and the smooth bezier
+  // shortcuts S/T are approximated by line-segment discretization, the
+  // same approach used for C/Q. The default N=16 sample density is
+  // visually indistinguishable from native rendering at typical arc
+  // sizes (<= 600px).
   const parsePathD = (d, svgLeft, svgTop) => {
     const toks = d.match(/[a-zA-Z]|[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?/g) || [];
     let i = 0;
@@ -514,6 +518,8 @@ const EXTRACT_SCRIPT = `(() => {
     const isCmd = (t) => /^[a-zA-Z]$/.test(t);
     const segs = [];
     let cx = 0, cy = 0, sx = 0, sy = 0;
+    let prevCubicCtrlX = NaN, prevCubicCtrlY = NaN;
+    let prevQuadCtrlX = NaN, prevQuadCtrlY = NaN;
     let cmd = '';
     const push = (x1, y1, x2, y2) => segs.push({
       x1: x1 + svgLeft, y1: y1 + svgTop, x2: x2 + svgLeft, y2: y2 + svgTop,
@@ -526,23 +532,29 @@ const EXTRACT_SCRIPT = `(() => {
         let x = num(), y = num();
         if (rel) { x += cx; y += cy; }
         cx = x; cy = y; sx = x; sy = y;
-        cmd = rel ? 'l' : 'L';
-        continue;
+        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
+        cmd = rel ? 'l' : 'L'; continue;
       }
       if (c === 'L') {
         let x = num(), y = num();
         if (rel) { x += cx; y += cy; }
-        push(cx, cy, x, y); cx = x; cy = y; continue;
+        push(cx, cy, x, y); cx = x; cy = y;
+        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
+        continue;
       }
       if (c === 'H') {
         let x = num();
         if (rel) x += cx;
-        push(cx, cy, x, cy); cx = x; continue;
+        push(cx, cy, x, cy); cx = x;
+        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
+        continue;
       }
       if (c === 'V') {
         let y = num();
         if (rel) y += cy;
-        push(cx, cy, cx, y); cy = y; continue;
+        push(cx, cy, cx, y); cy = y;
+        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
+        continue;
       }
       if (c === 'C') {
         let c1x = num(), c1y = num(), c2x = num(), c2y = num(), ex = num(), ey = num();
@@ -555,6 +567,8 @@ const EXTRACT_SCRIPT = `(() => {
           const by = it*it*it*cy + 3*it*it*t*c1y + 3*it*t*t*c2y + t*t*t*ey;
           push(px, py, bx, by); px = bx; py = by;
         }
+        prevCubicCtrlX = c2x; prevCubicCtrlY = c2y;
+        prevQuadCtrlX = NaN; prevQuadCtrlY = NaN;
         cx = ex; cy = ey; continue;
       }
       if (c === 'Q') {
@@ -568,10 +582,115 @@ const EXTRACT_SCRIPT = `(() => {
           const by = it*it*cy + 2*it*t*cpy + t*t*ey;
           push(px, py, bx, by); px = bx; py = by;
         }
+        prevQuadCtrlX = cpx; prevQuadCtrlY = cpy;
+        prevCubicCtrlX = NaN; prevCubicCtrlY = NaN;
         cx = ex; cy = ey; continue;
       }
       if (c === 'Z') {
-        push(cx, cy, sx, sy); cx = sx; cy = sy; continue;
+        push(cx, cy, sx, sy); cx = sx; cy = sy;
+        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
+        continue;
+      }
+      if (c === 'S') {
+        let c2x = num(), c2y = num(), ex = num(), ey = num();
+        if (rel) { c2x += cx; c2y += cy; ex += cx; ey += cy; }
+        const c1x = isNaN(prevCubicCtrlX) ? cx : (2 * cx - prevCubicCtrlX);
+        const c1y = isNaN(prevCubicCtrlY) ? cy : (2 * cy - prevCubicCtrlY);
+        const N = 16;
+        let px = cx, py = cy;
+        for (let k = 1; k <= N; k++) {
+          const t = k / N, it = 1 - t;
+          const bx = it*it*it*cx + 3*it*it*t*c1x + 3*it*t*t*c2x + t*t*t*ex;
+          const by = it*it*it*cy + 3*it*it*t*c1y + 3*it*t*t*c2y + t*t*t*ey;
+          push(px, py, bx, by); px = bx; py = by;
+        }
+        prevCubicCtrlX = c2x; prevCubicCtrlY = c2y;
+        prevQuadCtrlX = NaN; prevQuadCtrlY = NaN;
+        cx = ex; cy = ey; continue;
+      }
+      if (c === 'T') {
+        let ex = num(), ey = num();
+        if (rel) { ex += cx; ey += cy; }
+        const cpx = isNaN(prevQuadCtrlX) ? cx : (2 * cx - prevQuadCtrlX);
+        const cpy = isNaN(prevQuadCtrlY) ? cy : (2 * cy - prevQuadCtrlY);
+        const N = 12;
+        let px = cx, py = cy;
+        for (let k = 1; k <= N; k++) {
+          const t = k / N, it = 1 - t;
+          const bx = it*it*cx + 2*it*t*cpx + t*t*ex;
+          const by = it*it*cy + 2*it*t*cpy + t*t*ey;
+          push(px, py, bx, by); px = bx; py = by;
+        }
+        prevQuadCtrlX = cpx; prevQuadCtrlY = cpy;
+        prevCubicCtrlX = NaN; prevCubicCtrlY = NaN;
+        cx = ex; cy = ey; continue;
+      }
+      if (c === 'A') {
+        let rx = Math.abs(num()), ry = Math.abs(num());
+        const xAxisRotDeg = num();
+        const largeArc = num() !== 0;
+        const sweep = num() !== 0;
+        let ex = num(), ey = num();
+        if (rel) { ex += cx; ey += cy; }
+
+        if (rx === 0 || ry === 0 || (cx === ex && cy === ey)) {
+          push(cx, cy, ex, ey);
+          prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
+          cx = ex; cy = ey; continue;
+        }
+
+        const phi = (xAxisRotDeg * Math.PI) / 180;
+        const cosPhi = Math.cos(phi), sinPhi = Math.sin(phi);
+        const dx = (cx - ex) / 2, dy = (cy - ey) / 2;
+        const x1p =  cosPhi * dx + sinPhi * dy;
+        const y1p = -sinPhi * dx + cosPhi * dy;
+
+        const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+        if (lambda > 1) {
+          const sqrtL = Math.sqrt(lambda);
+          rx *= sqrtL;
+          ry *= sqrtL;
+        }
+
+        const sign = largeArc === sweep ? -1 : 1;
+        const numer = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+        const denom = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+        const factor = denom === 0 ? 0 : sign * Math.sqrt(Math.max(0, numer / denom));
+
+        const cxp = factor * (rx * y1p) / ry;
+        const cyp = factor * -(ry * x1p) / rx;
+
+        const acx = cosPhi * cxp - sinPhi * cyp + (cx + ex) / 2;
+        const acy = sinPhi * cxp + cosPhi * cyp + (cy + ey) / 2;
+
+        const ang = (ux, uy, vx, vy) => {
+          const dot = ux * vx + uy * vy;
+          const len = Math.sqrt((ux * ux + uy * uy) * (vx * vx + vy * vy));
+          let a = Math.acos(Math.max(-1, Math.min(1, len === 0 ? 1 : dot / len)));
+          if (ux * vy - uy * vx < 0) a = -a;
+          return a;
+        };
+
+        const theta1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+        let delta = ang(
+          (x1p - cxp) / rx, (y1p - cyp) / ry,
+          (-x1p - cxp) / rx, (-y1p - cyp) / ry,
+        );
+        if (!sweep && delta > 0) delta -= 2 * Math.PI;
+        if (sweep && delta < 0) delta += 2 * Math.PI;
+
+        const arcLen = Math.abs(delta) * Math.max(rx, ry);
+        const N = Math.max(8, Math.min(64, Math.ceil(arcLen / 16)));
+        let px = cx, py = cy;
+        for (let k = 1; k <= N; k++) {
+          const t = theta1 + (delta * k) / N;
+          const ptX = cosPhi * (rx * Math.cos(t)) - sinPhi * (ry * Math.sin(t)) + acx;
+          const ptY = sinPhi * (rx * Math.cos(t)) + cosPhi * (ry * Math.sin(t)) + acy;
+          push(px, py, ptX, ptY);
+          px = ptX; py = ptY;
+        }
+        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
+        cx = ex; cy = ey; continue;
       }
       break;
     }
