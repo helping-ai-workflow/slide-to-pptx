@@ -268,7 +268,7 @@ export function measureToIR(m: PageMeasure): IRPage {
         classification: classifyLeaf({
           type: 'svg',
           rect: unionRect,
-          hasPath: s.hasPath,
+          hasUnsupportedPath: s.hasUnsupportedPath,
           hasUse: s.hasUse,
           hasPattern: s.hasPattern,
           hasMask: s.hasMask,
@@ -285,7 +285,7 @@ export function measureToIR(m: PageMeasure): IRPage {
         item.classification = classifyLeaf({
           type: 'svg',
           rect: item.rect,
-          hasPath: s.hasPath,
+          hasUnsupportedPath: s.hasUnsupportedPath,
           hasUse: s.hasUse,
           hasPattern: s.hasPattern,
           hasMask: s.hasMask,
