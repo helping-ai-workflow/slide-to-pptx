@@ -70,7 +70,7 @@ test('small simple SVG → SvgIcon', () => {
   const res = classifyLeaf({
     type: 'svg',
     rect: { x: 0, y: 0, w: 24, h: 24 },
-    hasPath: false, hasUse: false, hasPattern: false, hasMask: false,
+    hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false,
   });
   assert.equal(res.kind, 'SvgIcon');
 });
@@ -142,13 +142,23 @@ test('decor with clip-path → ImageFallback', () => {
   assert.ok(res.reasons.some((r) => r.startsWith('clip-path:')));
 });
 
-test('svg with complex <path> → ImageFallback', () => {
+test('svg with unsupported path command → ImageFallback', () => {
   const res = classifyLeaf({
     type: 'svg',
     rect: { x: 0, y: 0, w: 200, h: 200 },
-    hasPath: true, hasUse: false, hasPattern: false, hasMask: false,
+    hasUnsupportedPath: true, hasUse: false, hasPattern: false, hasMask: false,
   });
   assert.equal(res.kind, 'ImageFallback');
+  assert.ok(res.reasons.some((r) => r.startsWith('svg:')));
+});
+
+test('svg with only supported path commands → SvgIcon', () => {
+  const res = classifyLeaf({
+    type: 'svg',
+    rect: { x: 0, y: 0, w: 200, h: 200 },
+    hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false,
+  });
+  assert.equal(res.kind, 'SvgIcon');
   assert.ok(res.reasons.some((r) => r.startsWith('svg:')));
 });
 
