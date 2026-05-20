@@ -80,10 +80,12 @@ export type SvgShape = {
   fontSize: number;
   fontFamily: string;
   textAnchor: string;
-  // Structural flags for the classifier. `hasPath` is set when the parent SVG
-  // contains at least one <path d="..."> element; same for the others. These
-  // are computed once per <svg> root and propagated to every shape it contains.
-  hasPath: boolean;
+  // Structural flags for the classifier. `hasUnsupportedPath` is set when the
+  // parent SVG contains at least one <path d="..."> element whose 'd' attribute
+  // uses commands outside the set parsePathD can handle (e.g. 'A' arcs,
+  // 'S'/'T' smooth bezier shortcuts). When true, the classifier falls back to
+  // an image render for this SVG root.
+  hasUnsupportedPath: boolean;
   hasUse: boolean;
   hasPattern: boolean;
   hasMask: boolean;
@@ -478,7 +480,7 @@ const EXTRACT_SCRIPT = `(() => {
           rx: 0, x1, y1, x2, y2, points: '',
           markerEnd: '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
-          hasPath: false, hasUse: false, hasPattern: false, hasMask: false,
+          hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false,
           leafId: leafIdOf(el) + ':b' + side,
           groupId,
         });
@@ -489,6 +491,19 @@ const EXTRACT_SCRIPT = `(() => {
       if (sides.l.w > 0) pushLine(rect.x, rect.y, rect.x, rect.y + rect.h, sides.l.w, sides.l.c, 'l');
     }
   }
+
+  // Commands the parsePathD parser can faithfully convert to line segments.
+  // Anything outside this set (typically 'A' for arcs, 'S'/'T' for smooth
+  // bezier shortcuts) cannot be rendered natively and triggers image
+  // fallback at the classifier.
+  const SUPPORTED_PATH_CMDS = new Set(['M','L','H','V','C','Q','Z','m','l','h','v','c','q','z']);
+  const hasUnsupportedPathCommand = (d) => {
+    if (!d) return false;
+    const cmds = d.match(/[a-zA-Z]/g);
+    if (!cmds) return false;
+    for (const c of cmds) if (!SUPPORTED_PATH_CMDS.has(c)) return true;
+    return false;
+  };
 
   // Parse an SVG <path d="..."> into screen-space line segments.
   // Supports M/L/H/V/C/Q/Z (abs + rel). S/T/A skipped — uncommon for our decks.
@@ -567,8 +582,15 @@ const EXTRACT_SCRIPT = `(() => {
   const SVG_TAGS = new Set(['rect','line','polyline','circle','ellipse','text','path']);
   const svgRootFlags = new WeakMap();
   for (const svg of document.querySelectorAll('svg')) {
+    let hasUnsupportedPath = false;
+    for (const p of svg.querySelectorAll('path')) {
+      if (hasUnsupportedPathCommand(p.getAttribute('d'))) {
+        hasUnsupportedPath = true;
+        break;
+      }
+    }
     svgRootFlags.set(svg, {
-      hasPath:    !!svg.querySelector('path'),
+      hasUnsupportedPath,
       hasUse:     !!svg.querySelector('use'),
       hasPattern: !!svg.querySelector('pattern'),
       hasMask:    !!svg.querySelector('mask'),
@@ -608,7 +630,7 @@ const EXTRACT_SCRIPT = `(() => {
           points: '',
           markerEnd: k === segs.length - 1 ? me : '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
-          ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+          ...(svgRootFlags.get(el.closest('svg')) || { hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false }),
           leafId: leafIdOf(el),
           groupId: gid,
         });
@@ -651,7 +673,7 @@ const EXTRACT_SCRIPT = `(() => {
       fontSize: parsePx(cs.fontSize),
       fontFamily: cs.fontFamily || '',
       textAnchor: el.getAttribute('text-anchor') || 'start',
-      ...(svgRootFlags.get(el.closest('svg')) || { hasPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+      ...(svgRootFlags.get(el.closest('svg')) || { hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false }),
       leafId: leafIdOf(el),
       groupId: el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
     });
@@ -769,7 +791,7 @@ export async function measureSlide(
         const c = classifyLeaf({
           type: 'svg',
           rect: s.rect,
-          hasPath: s.hasPath,
+          hasUnsupportedPath: s.hasUnsupportedPath,
           hasUse: s.hasUse,
           hasPattern: s.hasPattern,
           hasMask: s.hasMask,

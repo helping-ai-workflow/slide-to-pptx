@@ -44,7 +44,7 @@ export type DecorClassifierInput = {
 export type SvgClassifierInput = {
   type: 'svg';
   rect: Rect;
-  hasPath: boolean;
+  hasUnsupportedPath: boolean;
   hasUse: boolean;
   hasPattern: boolean;
   hasMask: boolean;
@@ -116,12 +116,12 @@ export function classifyLeaf(input: ClassifierInput): LeafClassification {
     }
 
     case 'svg': {
-      const { rect, hasPath, hasUse, hasPattern, hasMask } = input;
-      const complex = hasPath || hasUse || hasPattern || hasMask;
+      const { rect, hasUnsupportedPath, hasUse, hasPattern, hasMask } = input;
+      const complex = hasUnsupportedPath || hasUse || hasPattern || hasMask;
       const fits = rect.w <= SVG_ICON_MAX_DIM && rect.h <= SVG_ICON_MAX_DIM;
       if (complex) {
         const sources = [
-          hasPath ? 'path' : null,
+          hasUnsupportedPath ? 'unsupported-path' : null,
           hasUse ? 'use' : null,
           hasPattern ? 'pattern' : null,
           hasMask ? 'mask' : null,
