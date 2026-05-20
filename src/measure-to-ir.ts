@@ -1,5 +1,6 @@
 import type { IRGroup, IRPage, IRItem, IRRichText, IRImage, IRDecorBox, IRShape, Run } from './types.js';
 import type { PageMeasure, Rect, TextLeaf, ImageLeaf, DecorBox, PrimMeasure, SvgShape } from './extract-pw.js';
+import { classifyLeaf } from './classifier.js';
 
 const CANVAS_W = 1920 as const;
 const CANVAS_H = 1080 as const;
@@ -97,6 +98,14 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
           ? 'mono' : 'body',
         align: isCenter ? 'center' : isRight ? 'right' : 'left',
         valign: 'top',
+        classification: classifyLeaf({
+          type: 'text',
+          text: s.text,
+          rect: s.rect,
+          color: s.fill,
+          fontSize: s.fontSize,
+          fontFamily: s.fontFamily,
+        }),
       } as IRRichText];
     }
     default:
@@ -124,6 +133,14 @@ function textLeafToRich(t: TextLeaf, id: string): IRRichText {
     align: (t.textAlign === 'center' || t.textAlign === 'right' || t.textAlign === 'left')
       ? (t.textAlign as any) : 'left',
     valign: 'top',
+    classification: classifyLeaf({
+      type: 'text',
+      text: t.text,
+      rect: t.rect,
+      color: t.color,
+      fontSize: t.fontSize,
+      fontFamily: t.fontFamily,
+    }),
   };
 }
 
@@ -165,6 +182,12 @@ export function measureToIR(m: PageMeasure): IRPage {
       borderRadii: d.borderRadii,
       boxShadow: d.boxShadow || undefined,
     };
+    decor.classification = classifyLeaf({
+      type: 'decor',
+      rect: d.rect,
+      background: d.background,
+      borderWidth: d.borderWidth,
+    });
     push(d.groupId, decor);
   }
 
@@ -185,6 +208,11 @@ export function measureToIR(m: PageMeasure): IRPage {
       src: im.src,
       alt: im.alt,
     };
+    img.classification = classifyLeaf({
+      type: 'image',
+      rect: im.rect,
+      src: im.src,
+    });
     push(im.groupId, img);
   }
 
@@ -202,6 +230,16 @@ export function measureToIR(m: PageMeasure): IRPage {
   for (const s of m.svgShapes) {
     const items = svgToIR(s, `svg-${svgN++}`);
     for (const item of items) {
+      if (item.kind === 'Shape') {
+        item.classification = classifyLeaf({
+          type: 'svg',
+          rect: item.rect,
+          hasPath: false,
+          hasUse: false,
+          hasPattern: false,
+          hasMask: false,
+        });
+      }
       push(s.groupId, item);
     }
   }

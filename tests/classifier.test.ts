@@ -74,3 +74,41 @@ test('small simple SVG → SvgIcon', () => {
   });
   assert.equal(res.kind, 'SvgIcon');
 });
+
+import { measureToIR } from '../src/measure-to-ir.ts';
+import type { PageMeasure } from '../src/extract-pw.ts';
+
+test('measureToIR attaches classification to every leaf', () => {
+  const fakePage = {
+    pageIndex: 0,
+    pageName: 'Test',
+    primitives: [{
+      id: 'p0', parentId: null, name: 'Root',
+      rect: { x: 0, y: 0, w: 1920, h: 1080 },
+    }],
+    decors: [{
+      groupId: 'p0',
+      rect: { x: 0, y: 0, w: 1920, h: 1080 },
+      background: '#fff',
+      borderWidth: 0,
+      borderRadii: [0, 0, 0, 0],
+    }],
+    images: [],
+    texts: [{
+      groupId: 'p0', text: 'hello',
+      rect: { x: 100, y: 100, w: 200, h: 40 },
+      color: '#000', fontSize: 20, fontFamily: 'sans-serif',
+      fontWeight: 400, textAlign: 'left',
+    }],
+    svgShapes: [],
+  } as unknown as PageMeasure;
+
+  const ir = measureToIR(fakePage);
+  function walk(items: typeof ir.items): void {
+    for (const it of items) {
+      if (it.kind === 'Group') { walk(it.children); continue; }
+      assert.ok(it.classification, `${it.kind} leaf must have classification`);
+    }
+  }
+  walk(ir.items);
+});
