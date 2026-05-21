@@ -580,6 +580,45 @@ const EXTRACT_SCRIPT = `(() => {
     if (tag === 'path') {
       const totalLen = el.getTotalLength ? el.getTotalLength() : 0;
       if (totalLen <= 0) continue;
+      // Plan I: detect linear-only paths (M/L/H/V/Z command letters only,
+      // no curves C/S/Q/T/A) and emit as ONE polyline svgShape. The
+      // downstream classifier in measure-to-ir.ts collapses it further to
+      // a single line / rect when geometry allows. Curved paths keep the
+      // per-segment line emission below (pptxgenjs has no native multi-
+      // vertex or custom-geometry primitive in scope here).
+      const dAttr = el.getAttribute('d') || '';
+      const cmdLetters = (dAttr.match(/[a-zA-Z]/g) || []).map((c) => c.toUpperCase());
+      const LINEAR_CMDS = new Set(['M', 'L', 'H', 'V', 'Z']);
+      const isLinearPath = cmdLetters.length > 0 && cmdLetters.every((c) => LINEAR_CMDS.has(c));
+      if (isLinearPath) {
+        const N = Math.max(16, Math.min(256, Math.ceil(totalLen / 8)));
+        const screenPts = [];
+        for (let k = 0; k <= N; k++) {
+          const userPt = el.getPointAtLength((k * totalLen) / N);
+          const sp = toScreenPt(el, userPt.x, userPt.y);
+          screenPts.push(sp.x + ',' + sp.y);
+        }
+        const stroke = cs.stroke && cs.stroke !== 'none' ? colorRgbToHex(cs.stroke) : '';
+        const fill = cs.fill && cs.fill !== 'none' ? colorRgbToHex(cs.fill) : '';
+        const sw = parsePx(cs.strokeWidth);
+        const dashed = !!cs.strokeDasharray && cs.strokeDasharray !== 'none';
+        const me = el.getAttribute('marker-end') || '';
+        const gid = el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null;
+        svgShapes.push({
+          tag: 'polyline',
+          rect: pickRect(el),
+          fill, stroke, strokeWidth: sw, dashed,
+          rx: 0,
+          x1: 0, y1: 0, x2: 0, y2: 0,
+          points: screenPts.join(' '),
+          markerEnd: me,
+          text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+          ...(svgRootFlags.get(el.closest('svg')) || { hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+          leafId: leafIdOf(el),
+          groupId: gid,
+        });
+        continue;
+      }
       // Sample density: ~one segment per 8 screen-pixels along the path.
       // getTotalLength returns user-space length; proportional to screen length
       // for non-skewed CTMs — good enough for sampling granularity.
