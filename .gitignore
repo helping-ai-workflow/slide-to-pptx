@@ -8,8 +8,14 @@ pptx/
 .cache/
 baseline/
 docs/superpowers/
+docs/visual-regression-baseline.json
 tests/fixtures/**/*.pptx
 tests/fixtures/**/*.snapshots/
 tests/fixtures/**/*.fidelity.json
 tests/fixtures/**/*.html
 tests/fixtures/**/*.ir.json
+tests/fixtures/stress/**/*.pptx
+tests/fixtures/stress/**/*.snapshots/
+tests/fixtures/stress/**/*.fidelity.json
+tests/fixtures/stress/**/*.html
+tests/fixtures/stress/**/*.ir.json
