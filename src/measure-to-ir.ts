@@ -1,6 +1,7 @@
 import type { IRGroup, IRPage, IRItem, IRRichText, IRImage, IRDecorBox, IRShape, Run } from './types.js';
 import type { PageMeasure, Rect, TextLeaf, ImageLeaf, DecorBox, PrimMeasure, SvgShape } from './extract-pw.js';
 import { classifyLeaf } from './classifier.js';
+import { classifyPoints, type Point } from './shape-classify.js';
 
 const CANVAS_W = 1920 as const;
 const CANVAS_H = 1080 as const;
@@ -53,18 +54,48 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
       } as IRShape];
     case 'polyline': {
       const nums = s.points.trim().split(/[\s,]+/).map(parseFloat).filter((v) => !isNaN(v));
-      const out: IRItem[] = [];
-      for (let i = 0; i + 3 < nums.length; i += 2) {
-        const x1 = nums[i], y1 = nums[i + 1], x2 = nums[i + 2], y2 = nums[i + 3];
-        out.push({
-          kind: 'Shape', id: `${id}-seg-${i / 2}`, shape: 'line',
+      const pts: Point[] = [];
+      for (let i = 0; i + 1 < nums.length; i += 2) pts.push({ x: nums[i], y: nums[i + 1] });
+      const cls = classifyPoints(pts);
+      if (cls.kind === 'line') {
+        return [{
+          kind: 'Shape', id, shape: 'line',
           rect: {
-            x: Math.min(x1, x2), y: Math.min(y1, y2),
-            w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+            x: Math.min(cls.a.x, cls.b.x),
+            y: Math.min(cls.a.y, cls.b.y),
+            w: Math.abs(cls.b.x - cls.a.x),
+            h: Math.abs(cls.b.y - cls.a.y),
           },
           stroke: s.stroke || undefined,
           strokeWidth: s.strokeWidth,
-          flipH: x1 > x2, flipV: y1 > y2,
+          flipH: cls.a.x > cls.b.x,
+          flipV: cls.a.y > cls.b.y,
+        } as IRShape];
+      }
+      if (cls.kind === 'rect') {
+        return [{
+          kind: 'Shape', id, shape: 'rect',
+          rect: { x: cls.x, y: cls.y, w: cls.w, h: cls.h },
+          fill: s.fill || undefined,
+          stroke: s.stroke || undefined,
+          strokeWidth: s.strokeWidth,
+        } as IRShape];
+      }
+      // polyline — keep the existing N-1 segment fallback.
+      const out: IRItem[] = [];
+      for (let i = 0; i + 1 < cls.points.length; i++) {
+        const a = cls.points[i];
+        const b = cls.points[i + 1];
+        out.push({
+          kind: 'Shape', id: `${id}-seg-${i}`, shape: 'line',
+          rect: {
+            x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+            w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y),
+          },
+          stroke: s.stroke || undefined,
+          strokeWidth: s.strokeWidth,
+          flipH: a.x > b.x,
+          flipV: a.y > b.y,
         } as IRShape);
       }
       return out;
