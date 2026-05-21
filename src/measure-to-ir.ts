@@ -1,4 +1,4 @@
-import type { IRGroup, IRPage, IRItem, IRRichText, IRImage, IRDecorBox, IRShape, Run } from './types.js';
+import type { IRGroup, IRPage, IRItem, IRRichText, IRImage, IRDecorBox, IRShape, IRCurvePath, Run } from './types.js';
 import type { PageMeasure, Rect, TextLeaf, ImageLeaf, DecorBox, PrimMeasure, SvgShape } from './extract-pw.js';
 import { classifyLeaf } from './classifier.js';
 import { classifyPoints, type Point } from './shape-classify.js';
@@ -52,6 +52,25 @@ function svgToIR(s: SvgShape, id: string): IRItem[] {
         flipH: s.x1 > s.x2,
         flipV: s.y1 > s.y2,
       } as IRShape];
+    case 'curvePath': {
+      const nums = s.points.trim().split(/[\s,]+/).map(parseFloat).filter((v) => !isNaN(v));
+      const pts: { x: number; y: number }[] = [];
+      for (let i = 0; i + 1 < nums.length; i += 2) pts.push({ x: nums[i], y: nums[i + 1] });
+      if (pts.length < 2) return [];
+      return [{
+        kind: 'CurvePath',
+        id,
+        points: pts,
+        closed: !!s.closed,
+        rect: r(s.rect),
+        fill: s.fill || undefined,
+        stroke: s.stroke || undefined,
+        strokeWidth: s.strokeWidth,
+        dashed: s.dashed,
+        endArrow: !!s.markerEnd,
+        domLeafId: s.leafId,
+      } as IRCurvePath];
+    }
     case 'polyline': {
       const nums = s.points.trim().split(/[\s,]+/).map(parseFloat).filter((v) => !isNaN(v));
       const pts: Point[] = [];
@@ -382,7 +401,7 @@ export function measureToIR(m: PageMeasure): IRPage {
     if (handledLeafIds.has(s.leafId)) continue;  // already emitted as fallback
     const items = svgToIR(s, `svg-${svgN++}`);
     for (const item of items) {
-      if (item.kind === 'Shape') {
+      if (item.kind === 'Shape' || item.kind === 'CurvePath') {
         item.classification = classifyLeaf({
           type: 'svg',
           rect: item.rect,
@@ -392,7 +411,7 @@ export function measureToIR(m: PageMeasure): IRPage {
           hasMask: s.hasMask,
         });
         item.domLeafId = s.leafId;
-        if (s.fallbackImageDataUrl) item.fallbackImageDataUrl = s.fallbackImageDataUrl;
+        if (item.kind === 'Shape' && s.fallbackImageDataUrl) item.fallbackImageDataUrl = s.fallbackImageDataUrl;
       }
       push(s.groupId, item);
     }
