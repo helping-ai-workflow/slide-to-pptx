@@ -163,6 +163,35 @@ export function measureToIR(m: PageMeasure): IRPage {
   for (const p of m.primitives) {
     if (p.fallbackImageDataUrl) fallbackPrimIds.add(p.id);
   }
+  // Cascade suppression: a primitive nested INSIDE a fallback'd primitive is
+  // already baked into the parent's screenshot. Without cascade, step 1
+  // would still create a Group for the nested primitive, step 3 would push
+  // it into bucket[parentId], but the parent has no entry in groupById
+  // (skipped on line 176) — the nested primitive (and all its descendants)
+  // would silently vanish from the IR. Tracked separately from
+  // fallbackPrimIds so we suppress these primitives entirely in step 3
+  // (no separate Image leaf — they have no fallbackImageDataUrl of their
+  // own, since the parent's screenshot already covers them). The leaf-level
+  // closest-primitive checks (steps 2/4/5/6) walk the DOM up to the closest
+  // [data-prim-id] which is the nested primitive itself; we extend those by
+  // also treating cascade-suppressed groups as fallback for leaf rejection.
+  const cascadeSuppressedPrimIds = new Set<string>();
+  for (const p of m.primitives) {
+    if (fallbackPrimIds.has(p.id)) continue;
+    let anc = p.parentId;
+    while (anc) {
+      if (fallbackPrimIds.has(anc) || cascadeSuppressedPrimIds.has(anc)) {
+        cascadeSuppressedPrimIds.add(p.id);
+        break;
+      }
+      const parent = m.primitives.find((q) => q.id === anc);
+      anc = parent ? parent.parentId : null;
+    }
+  }
+  // Unified set used by every leaf-suppression check below. Cascade-
+  // suppressed primitives still need their leaves dropped (the parent's
+  // screenshot already contains them).
+  const suppressedPrimIds = new Set<string>([...fallbackPrimIds, ...cascadeSuppressedPrimIds]);
   const push = (parentId: string | null, item: IRItem) => {
     let arr = buckets.get(parentId);
     if (!arr) { arr = []; buckets.set(parentId, arr); }
@@ -171,9 +200,11 @@ export function measureToIR(m: PageMeasure): IRPage {
 
   // 1) Create empty groups for every primitive — preserves declaration order.
   //    Primitives flagged for image-fallback skip group creation; they are
-  //    substituted with a single Image leaf in step 3.
+  //    substituted with a single Image leaf in step 3. Cascade-suppressed
+  //    primitives also skip group creation AND skip step 3 entirely (their
+  //    rendering is baked into the ancestor's screenshot).
   for (const p of m.primitives) {
-    if (fallbackPrimIds.has(p.id)) continue;
+    if (suppressedPrimIds.has(p.id)) continue;
     const g: IRGroup = {
       kind: 'Group',
       id: p.id,
@@ -190,7 +221,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   let decorN = 0;
   for (const d of m.decors) {
     if (d.rect.w * d.rect.h > CANVAS_AREA * 0.9) continue;
-    if (d.groupId && fallbackPrimIds.has(d.groupId)) continue; // baked into primitive screenshot
+    if (d.groupId && suppressedPrimIds.has(d.groupId)) continue; // baked into primitive screenshot
     const decor: IRDecorBox = {
       kind: 'Decor',
       id: `decor-${decorN++}`,
@@ -215,9 +246,13 @@ export function measureToIR(m: PageMeasure): IRPage {
 
   // 3) Place groups under their parent — drawn on top of any decor that
   //    shares the same bucket. Fallback'd primitives become a single Image
-  //    leaf at the primitive's rect instead of an editable group.
+  //    leaf at the primitive's rect instead of an editable group. Cascade-
+  //    suppressed primitives emit nothing here: the ancestor's screenshot
+  //    already includes them and the leaf-rejection loops below drop their
+  //    descendants.
   let primImgN = 0;
   for (const p of m.primitives) {
+    if (cascadeSuppressedPrimIds.has(p.id)) continue;
     if (fallbackPrimIds.has(p.id)) {
       const img: IRImage = {
         kind: 'Image',
@@ -231,7 +266,6 @@ export function measureToIR(m: PageMeasure): IRPage {
         kind: 'ImageFallback',
         reasons: ['primitive:non-native-background'],
       };
-      img.fallbackImageDataUrl = p.fallbackImageDataUrl;
       push(p.parentId, img);
       continue;
     }
@@ -242,7 +276,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   // 4) Images.
   let imgN = 0;
   for (const im of m.images) {
-    if (im.groupId && fallbackPrimIds.has(im.groupId)) continue;
+    if (im.groupId && suppressedPrimIds.has(im.groupId)) continue;
     const img: IRImage = {
       kind: 'Image',
       id: `img-${imgN++}`,
@@ -265,7 +299,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   for (const t of m.texts) {
     if (!t.text || !t.text.trim()) continue;
     if (t.rect.w <= 0 || t.rect.h <= 0) continue;
-    if (t.groupId && fallbackPrimIds.has(t.groupId)) continue;
+    if (t.groupId && suppressedPrimIds.has(t.groupId)) continue;
     const rich = textLeafToRich(t, `txt-${txtN++}`);
     push(t.groupId, rich);
   }
@@ -283,7 +317,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   }
   const handledLeafIds = new Set<string>();
   for (const s of m.svgShapes) {
-    if (s.groupId && fallbackPrimIds.has(s.groupId)) continue;
+    if (s.groupId && suppressedPrimIds.has(s.groupId)) continue;
     // If this leafId has a fallback image and we haven't handled it yet, emit
     // a single ImageFallback covering the union bbox of all sibling segments
     // and skip the rest of the group.
