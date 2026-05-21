@@ -113,6 +113,40 @@ test('classify: open 4-point zigzag (not closed) → polyline', () => {
 
 // ─── degenerate rect-shaped paths ────────────────────────────────────────────
 
+// ─── high-density sampled inputs (simulate getPointAtLength behavior) ──────
+
+test('classify: 100-point high-density sample of a horizontal line → line', () => {
+  // Simulates a linear <path d="M 0 50 L 1000 50"> sampled at 100 positions.
+  const pts: { x: number; y: number }[] = [];
+  for (let k = 0; k <= 100; k++) pts.push({ x: k * 10, y: 50 });
+  const r = classifyPoints(pts);
+  assert.equal(r.kind, 'line');
+  if (r.kind === 'line') {
+    assert.deepEqual(r.a, { x: 0, y: 50 });
+    assert.deepEqual(r.b, { x: 1000, y: 50 });
+  }
+});
+
+test('classify: high-density sample of a closed axis-aligned rect → rect', () => {
+  // Simulates linear <path d="M 0 0 H 100 V 80 H 0 V 0 Z"> sampled at many
+  // positions along the perimeter — should collapse to ONE rect.
+  const pts: { x: number; y: number }[] = [];
+  const stepsPerEdge = 25;
+  // top edge: (0,0) → (100,0)
+  for (let k = 0; k <= stepsPerEdge; k++) pts.push({ x: (k * 100) / stepsPerEdge, y: 0 });
+  // right edge: (100,0) → (100,80)
+  for (let k = 1; k <= stepsPerEdge; k++) pts.push({ x: 100, y: (k * 80) / stepsPerEdge });
+  // bottom edge: (100,80) → (0,80)
+  for (let k = 1; k <= stepsPerEdge; k++) pts.push({ x: 100 - (k * 100) / stepsPerEdge, y: 80 });
+  // left edge: (0,80) → (0,0)
+  for (let k = 1; k <= stepsPerEdge; k++) pts.push({ x: 0, y: 80 - (k * 80) / stepsPerEdge });
+  const r = classifyPoints(pts);
+  assert.equal(r.kind, 'rect');
+  if (r.kind === 'rect') {
+    assert.deepEqual(r, { kind: 'rect', x: 0, y: 0, w: 100, h: 80 });
+  }
+});
+
 test('classify: closed 4-corner where two corners coincide (degenerate rect of zero height) → line', () => {
   // M 0 0 L 100 0 L 100 0 L 0 0 Z — degenerate; collapses to a horizontal line.
   // The first colinear-check on (0,0)→(100,0)→(100,0)→(0,0) succeeds because every

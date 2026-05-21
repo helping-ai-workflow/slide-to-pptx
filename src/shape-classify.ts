@@ -109,10 +109,46 @@ function tryRect(points: Point[]): ShapeClassResult | null {
   return { kind: 'rect', x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+// Collapse runs of points that are colinear with their immediate neighbors
+// down to just the run endpoints. Lets a high-density-sampled axis-aligned
+// rect (hundreds of points along four edges) reduce to its 4 corners + close
+// duplicate, so the downstream rect / colinearity checks can fire.
+//
+// Preserves the first and last point exactly so a closed path stays closed.
+function simplifyColinearRuns(points: Point[]): Point[] {
+  if (points.length <= 2) return points;
+  const out: Point[] = [points[0]];
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = out[out.length - 1];
+    const cur = points[i];
+    const next = points[i + 1];
+    // Drop cur if it lies on the segment prev→next within tolerance AND is
+    // not a duplicate of prev (degenerate moves like M x y M x y stay).
+    if (samePoint(prev, cur)) continue;
+    if (colinear3(prev, cur, next)) continue;
+    out.push(cur);
+  }
+  // Always preserve the final point (the closure vertex for closed paths).
+  const last = points[points.length - 1];
+  if (!samePoint(out[out.length - 1], last)) out.push(last);
+  return out;
+}
+
 export function classifyPoints(points: Point[]): ShapeClassResult {
   if (points.length < 2) return { kind: 'polyline', points };
   if (points.length === 2) {
     return { kind: 'line', a: points[0], b: points[1] };
+  }
+
+  // Pre-simplify: drop intermediate points that lie on the segment between
+  // their neighbors. This turns a high-density-sampled rectangle into its
+  // 4 corners + closing duplicate, which the rect detector can then accept.
+  // Cheap (O(n)) and idempotent — already-simplified input is unchanged.
+  const simplified = simplifyColinearRuns(points);
+  if (simplified.length < points.length) {
+    // Re-classify on the simplified list (which may now be a 2-point line, a
+    // 5-point closed rect, or a smaller polyline).
+    return classifyPoints(simplified);
   }
 
   // All-colinear case (works for both open and closed paths — a closed
