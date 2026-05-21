@@ -349,13 +349,34 @@ const EXTRACT_SCRIPT = `(() => {
       }
     }
 
-    // Per-text padding helper: chromium gives content-fit bounds, but
-    // PowerPoint's font fallback (Cascadia for JetBrains Mono, system CJK
-    // for PingFang TC / Noto Sans TC) renders wider. Pad proportional to
-    // fontSize so big headings (hero / kicker) get enough slack to stay on
-    // one line. The legacy +8/+4 floor still applies for small body text.
-    const padRect = (r, fs) => {
-      r.w += Math.max(24, fs * 0.35);
+    // Per-text padding helper: chromium gives content-fit bounds. Widths
+    // need to be padded differently per text class:
+    //
+    // Latin / monospace text (JetBrains Mono, Segoe UI): PowerPoint's
+    // fallback (Cascadia for JetBrains Mono) renders WIDER than Chromium's
+    // bundled font — pad width generously so big headings keep their
+    // single-line layout.
+    //
+    // CJK-bearing text: PowerPoint falls back to Microsoft JhengHei via
+    // theme, which renders NARROWER than Chromium's Noto Sans CJK fallback.
+    // Over-padding the width pushes "Claude Code 上手" / "指南" wrap
+    // together onto one line because the rect now accommodates both. Use
+    // a minimal pad for CJK rects so PowerPoint's wrap behaviour matches
+    // Chromium's.
+    //
+    // Height pad always applies (line-height differences are small and
+    // a hair of extra vertical room never causes wrap regression).
+    const padRect = (r, fs, content) => {
+      const hasCJK = content && /[　-鿿가-힣＀-￯]/.test(content);
+      // CJK text needs NEGATIVE pad: PowerPoint's JhengHei is narrower than
+      // Chromium's Noto Sans CJK fallback, so the captured Chromium rect
+      // already over-reserves width relative to what PowerPoint will draw.
+      // Shrinking the rect by ~one-glyph-worth (≈fs * 0.5 per CJK character
+      // difference, but bounded to fs * 0.3 of slack removal) pushes
+      // PowerPoint to wrap closer to where Chromium did. Latin / mono text
+      // still needs POSITIVE pad because PowerPoint's Cascadia / Segoe
+      // fallback is wider than Chromium's bundled sans.
+      r.w += hasCJK ? -Math.min(r.w * 0.05, fs * 0.3) : Math.max(24, fs * 0.35);
       r.h += Math.max(8, fs * 0.15);
       return r;
     };
@@ -366,7 +387,7 @@ const EXTRACT_SCRIPT = `(() => {
         const crect = pickTextRect(c);
         if (crect.w <= 0 || crect.h <= 0) continue;
         const cfs = parsePx(ccs.fontSize);
-        padRect(crect, cfs);
+        padRect(crect, cfs, trim(c.textContent));
         texts.push({
           rect: crect,
           text: trim(c.textContent),
@@ -408,7 +429,7 @@ const EXTRACT_SCRIPT = `(() => {
       }
       if (bestFs > 0) effFontSize = bestFs;
     }
-    padRect(rect, effFontSize);
+    padRect(rect, effFontSize, trim(el.textContent));
     texts.push({
       rect,
       text: trim(el.textContent),

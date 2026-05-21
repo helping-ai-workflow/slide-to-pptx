@@ -71,13 +71,37 @@ function renderRichText(
   const h = Math.max(py(it.rect.h), 0.05);
   const fam = it.fontFamily ? FONT_MAP[it.fontFamily] : DEFAULT_BODY;
   const fs = Math.max(fpt(it.fontSize), 6);
-  const runs = it.runs.map((r) => ({
+  // Convert bare-newline runs into a `breakLine: true` flag on the
+  // preceding content run. The DOM extractor emits a literal `\n` text run
+  // whenever it encounters <br/> inside a leaf-of-block, intending it as a
+  // paragraph break. pptxgenjs's CRLF split fires only when a run contains
+  // a newline in the MIDDLE of its text — `text.includes(CRLF) &&
+  // !text.match(/\n$/)` — so a sole-`\n` run skips the split and the
+  // newline survives into the slide XML as `<a:t>\n</a:t>` inside the
+  // current `<a:p>`. PowerPoint then ignores it and lays out every run on
+  // one continuous line. Setting `breakLine: true` on the preceding run
+  // makes pptxgenjs close the current `<a:p>` and start a new one for the
+  // subsequent run, matching what the DOM intended.
+  const flatRuns: Array<{ run: Run; breakAfter: boolean }> = [];
+  for (const r of it.runs) {
+    const isBareNewline = r.text === '\n' || r.text === '\r\n';
+    if (isBareNewline) {
+      const last = flatRuns[flatRuns.length - 1];
+      if (last) last.breakAfter = true;
+      // Drop the standalone newline run; the break is captured by the
+      // preceding entry's `breakAfter` flag.
+      continue;
+    }
+    flatRuns.push({ run: r, breakAfter: false });
+  }
+  const runs = flatRuns.map(({ run: r, breakAfter }) => ({
     text: r.text,
     options: {
       color: r.color ? hex(r.color) : undefined,
       bold: r.bold || undefined,
       italic: r.italic || undefined,
       fontFace: r.mono ? MONO : undefined,
+      breakLine: breakAfter || undefined,
     },
   }));
   slide.addText(runs as any, {

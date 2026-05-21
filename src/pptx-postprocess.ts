@@ -194,6 +194,49 @@ function processSpTree(spTreeChildren: any[]): any[] {
   return work;
 }
 
+// East Asian typeface override.
+//
+// pptxgenjs emits `<a:latin typeface="X"/><a:ea typeface="X"/><a:cs typeface="X"/>`
+// with the SAME font name in every slot (see pptxgenjs runProps generator).
+// When X is a Latin-only family (e.g. "Segoe UI", "JetBrains Mono"),
+// PowerPoint hits `<a:ea typeface="Segoe UI"/>` for any CJK glyph and falls
+// back via the theme's Hant slot to `新細明體` (MingLiU) — a serifed
+// outline font that does NOT match Chromium's rendering (which used the
+// deck's stated chain `"PingFang TC", "Noto Sans TC", "Microsoft JhengHei"`
+// — none of those exist on Linux, so Chromium uses its own CJK fallback,
+// typically Noto Sans CJK, a rounded geometric sans).
+//
+// The visual delta between MingLiU (PowerPoint fallback) and Noto Sans CJK
+// (Chromium fallback) shows up in the diff as red glyph-outline doubling on
+// every CJK character — the 9-11% pixel-diff that Plan H2 targets.
+//
+// Fix: rewrite every `<a:ea typeface="..."/>` to "Microsoft JhengHei", the
+// standard Traditional Chinese font shipped with every Windows install with
+// CJK language support and the first installed candidate in the corpus
+// decks' stated CJK chain. This affects only how CJK glyphs render — Latin
+// glyphs still resolve via `<a:latin>` to the original family, so Latin
+// appearance is unchanged.
+//
+// Scope: applies to ALL runs (mono code blocks too) because the EA slot is
+// only consulted by PowerPoint when an East Asian glyph is encountered.
+// Code blocks remain pure Latin, so the override is inert there.
+//
+// If a deck someday specifies Japanese or Simplified Chinese, this regex
+// would over-eagerly route their EA glyphs to Microsoft JhengHei. That is
+// a known limitation tracked for a follow-up — for now JhengHei renders
+// JP/SC glyphs reasonably via shared CJK Unified Ideographs.
+const EA_FONT = 'Microsoft JhengHei';
+// fast-xml-parser's builder emits self-closing source as expanded
+// `<a:ea typeface="..." pitchFamily="34" charset="-122"></a:ea>` rather
+// than `<a:ea ... />`. Match both forms so the rewrite is robust if the
+// builder changes its default emission style.
+function rewriteEastAsianTypeface(xml: string): string {
+  return xml.replace(
+    /<a:ea\s+typeface="[^"]*"((?:\s+[a-zA-Z]+="[^"]*")*)\s*(\/>|><\/a:ea>)/g,
+    `<a:ea typeface="${EA_FONT}"$1$2`,
+  );
+}
+
 export async function postprocessPptx(pptxPath: string): Promise<void> {
   const buf = await readFile(pptxPath);
   const zip = await JSZip.loadAsync(buf);
@@ -212,7 +255,7 @@ export async function postprocessPptx(pptxPath: string): Promise<void> {
     if (spTreeIdx < 0) continue;
     const spTreeChildren = cSldKids[spTreeIdx]['p:spTree'];
     cSldKids[spTreeIdx]['p:spTree'] = processSpTree(spTreeChildren);
-    const newXml = builder.build(tree);
+    const newXml = rewriteEastAsianTypeface(builder.build(tree));
     zip.file(slidePath, newXml);
   }
 
