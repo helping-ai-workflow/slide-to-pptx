@@ -2,6 +2,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import JSZip from 'jszip';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import type { CustGeomSpec } from './custgeom.js';
+import { buildCustGeomNode, buildLineNode, buildFillNode } from './custgeom.js';
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -248,7 +250,59 @@ export function rewriteEastAsianTypeface(xml: string): string {
   );
 }
 
-export async function postprocessPptx(pptxPath: string): Promise<void> {
+function rewriteCustGeomShapes(spTree: any[], specs: CustGeomSpec[]): any[] {
+  return spTree.map((node) => {
+    const name = shapeName(node);
+    if (!name || !name.startsWith('__cust__')) return node;
+    const m = name.match(/^__cust__(\d+)__/);
+    if (!m) return node;
+    const idx = parseInt(m[1], 10);
+    const spec = specs[idx];
+    if (!spec) return node;
+    return rewritePlaceholderShape(node, spec);
+  });
+}
+
+function rewritePlaceholderShape(node: any, spec: CustGeomSpec): any {
+  // The placeholder is <p:sp> with <p:spPr> containing <a:xfrm>, <a:prstGeom prst="rect">.
+  // Goal: keep <a:xfrm>, replace <a:prstGeom> with <a:custGeom>, replace
+  // <a:solidFill>/<a:noFill> with the spec's fill (if any), replace <a:ln>
+  // with the spec's line, and strip the encoded prefix from the name.
+  const tag = Object.keys(node).find((k) => k.startsWith('p:'));
+  if (!tag) return node;
+  const children = node[tag];
+  for (const c of children) {
+    const k = Object.keys(c)[0];
+    if (k === 'p:nvSpPr') {
+      // Strip the __cust__N__ prefix so the final shape name is clean.
+      for (const ic of c[k]) {
+        if (Object.keys(ic)[0] === 'p:cNvPr') {
+          const attrs = ic[':@'];
+          if (attrs?.['@_name']) {
+            attrs['@_name'] = attrs['@_name'].replace(/^__cust__\d+__/, '');
+          }
+        }
+      }
+    }
+    if (k === 'p:spPr') {
+      const spPrKids: any[] = c[k];
+      // Keep <a:xfrm>, drop everything else, then append custGeom + fill + line.
+      const kept = spPrKids.filter((kid) => Object.keys(kid)[0] === 'a:xfrm');
+      kept.push(buildCustGeomNode(spec));
+      const fillNode = buildFillNode(spec);
+      if (fillNode) kept.push(fillNode);
+      else kept.push({ 'a:noFill': [] });
+      kept.push(buildLineNode(spec));
+      c[k] = kept;
+    }
+  }
+  return node;
+}
+
+export async function postprocessPptx(
+  pptxPath: string,
+  customGeomsPerSlide: CustGeomSpec[][] = [],
+): Promise<void> {
   const buf = await readFile(pptxPath);
   const zip = await JSZip.loadAsync(buf);
   const slideFiles = Object.keys(zip.files).filter((p) => /^ppt\/slides\/slide\d+\.xml$/.test(p));
@@ -264,7 +318,16 @@ export async function postprocessPptx(pptxPath: string): Promise<void> {
     const cSldKids = cSld['p:cSld'];
     const spTreeIdx = cSldKids.findIndex((n: any) => 'p:spTree' in n);
     if (spTreeIdx < 0) continue;
-    const spTreeChildren = cSldKids[spTreeIdx]['p:spTree'];
+    // Plan J: rewrite custGeom placeholders BEFORE processSpTree so the
+    // (now clean-named) curves participate in the same grouping pass as
+    // their primitive siblings.
+    const slideMatch = slidePath.match(/slide(\d+)\.xml$/);
+    const slideNumber = slideMatch ? parseInt(slideMatch[1], 10) : 0;
+    const specs = customGeomsPerSlide[slideNumber - 1] || [];
+    let spTreeChildren = cSldKids[spTreeIdx]['p:spTree'];
+    if (specs.length > 0) {
+      spTreeChildren = rewriteCustGeomShapes(spTreeChildren, specs);
+    }
     cSldKids[spTreeIdx]['p:spTree'] = processSpTree(spTreeChildren);
     const newXml = rewriteEastAsianTypeface(builder.build(tree));
     zip.file(slidePath, newXml);
