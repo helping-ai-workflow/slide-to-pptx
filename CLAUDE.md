@@ -56,6 +56,109 @@ History convention (verified via `git log`): release commits are titled
 exactly `release: vX.Y.Z` with no body, and ONLY bump version + lockfile.
 Bundling code changes into the release commit breaks the pattern.
 
+## Development workflow
+
+Multi-bug or multi-feature work uses a plan-driven, subagent-driven loop.
+One-off small fixes (typo, single-function tweak) skip this and go straight
+to a feature branch + PR.
+
+### When to write a plan
+
+Use `superpowers:writing-plans` (and the optional brainstorming/handoff
+companions) when the work fits any of these:
+
+- 2+ independent bug clusters or feature additions.
+- An investigation step is needed before the fix is obvious.
+- The user is going to hand work off to a fresh session (handoff prompt).
+
+Plans live at `docs/superpowers/plans/YYYY-MM-DD-plan-X-slug.md`. Brainstorm
+notes and handoff prompts live in sibling dirs under `docs/superpowers/`.
+**These files are never committed** (global rule in `~/.claude/CLAUDE.md`).
+They are local working state — implementation lands in code, not in
+plan/spec markdown.
+
+### Plan structure
+
+Each task in the plan should specify:
+
+- Acceptance criterion measurable from the harness (e.g. "diff% < 5% on
+  pages X/Y/Z, no other deck regression"), not just "the bug is fixed".
+- Hypothesis class + likely files to investigate.
+- Branch name: `feat/plan-X-N-slug` (new behavior) or `fix/plan-X-N-slug`
+  (bug fix). N = task number within the plan.
+- "Stop at PR opened" — the implementer must NOT merge; the controller
+  reviews first.
+
+### Per-task subagent loop
+
+`superpowers:subagent-driven-development` orchestrates one task at a time:
+
+1. **Implementer subagent** — fresh context per task. Creates branch,
+   investigates, fixes surgically, runs `npm test` + `npx tsc --noEmit`
+   + visual verify, commits, pushes, opens PR. **Stops before merge.**
+2. **Spec compliance reviewer** — confirms the goal was met. If the
+   implementer's actual root cause differed from the hypothesis, that is
+   fine *as long as the goal is met and scope stayed surgical*. Plan H1
+   hypothesized "table-cell text duplication" but the real cause was
+   "CSS gradient background dropped"; reviewer accepted because diff%
+   target was hit.
+3. **Code quality reviewer** — runs only after spec review passes. Flags
+   bugs in the new code path (not just style nits). Critical/Important
+   findings go back to the implementer on the same branch as a follow-up
+   commit. Re-review until clean.
+4. **Controller merges** with `gh pr merge <pr> --merge --delete-branch`.
+   `--merge` (not `--squash`) keeps per-commit history. After merge:
+   `git checkout main && git pull --ff-only`.
+
+Run spec and quality reviewers in parallel when neither needs to write
+code (both are read-only). Send fixes back to the original implementer
+subagent via `SendMessage` so the implementer keeps full context.
+
+### Visual verification is mandatory
+
+`npm test` and `npx tsc --noEmit` verify code correctness, not feature
+correctness. They CANNOT detect a visual regression. Before claiming a
+pptx-affecting fix works:
+
+- Read the relevant `diff-NN.png` with the Read tool. The agent is
+  multimodal; red pixels in the diff PNG are the only authoritative
+  signal that the user-visible result changed in the right direction.
+- "Editability 100%" and "fidelity.json fallbacks: []" are NOT proxies
+  for "looks right". Several pre-Plan-H releases shipped with the test
+  suite green but visually broken — the user caught them by opening the
+  pptx in PowerPoint. The visual-regression harness exists so the agent
+  can catch them first.
+
+### Test/tsc gates
+
+- `npm test` — current baseline 28/28 (was 19 before Plan H2's
+  `tests/pptx-postprocess.test.ts`). Implementers update this count
+  when they add tests; reviewers verify the count claim.
+- `npx tsc --noEmit` — must be clean.
+- `npm run pre-release` — full corpus visual regression, ~3-5 min via
+  PowerPoint COM. Required before tagging a release; recommended after
+  any change touching the IR / extraction / postprocess paths.
+
+### PR conventions
+
+- Title format: `<type>: <subject> (Plan X<N>)` where `<type>` is
+  `fix` / `feat` / `refactor` / `test` / `docs` / `chore`, and `(Plan
+  X<N>)` is included when the work is part of a plan (e.g. `(Plan H1)`).
+- Title ≤ 70 chars.
+- Body: Summary (root cause), Test plan (before/after diff% if visual,
+  `npm test` count, tsc result), reference to the plan file path.
+- Branch deleted automatically by `--delete-branch` on merge.
+
+### Hard rules (no exceptions even with `OK 更新 plugin` shortcut)
+
+- No commits directly to `main`.
+- No `--no-verify`, `--no-gpg-sign`, or `--admin` merge.
+- No force push to `main` or `master`.
+- No `--squash` (history convention is `--merge`).
+- No plan/spec docs committed under `docs/superpowers/{plans,specs}/`.
+- Release commit only touches `package.json` + `package-lock.json`; never
+  bundle code changes into a `release: vX.Y.Z` commit.
+
 ## Playwright Chromium
 
 `scripts/postinstall.cjs` runs after `npm install` and downloads Chromium
