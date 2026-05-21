@@ -39,6 +39,8 @@
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
     "typescript": "^5.6.3"
   },
   "scripts": {
@@ -47,6 +49,7 @@
     "test": "node --import tsx --test $(find tests -name '*.test.ts' -not -name 'corpus.test.ts')",
     "test:corpus": "node --import tsx --test tests/corpus.test.ts",
     "test:all": "node --import tsx --test $(find tests -name '*.test.ts')",
+    "pre-release": "node scripts/visual-regression.mjs",
     "postinstall": "node scripts/postinstall.cjs"
   },
   "repository": {
