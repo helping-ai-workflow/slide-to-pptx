@@ -146,6 +146,25 @@ test('line node: endArrow uses <a:tailEnd> (matches pptxgenjs endArrowType)', ()
   assert.doesNotMatch(xml, /<a:headEnd/);
 });
 
+test('line node: missing stroke → null (caller omits <a:ln>)', () => {
+  const spec: CustGeomSpec = {
+    points: [{ x: 0, y: 0 }, { x: 10, y: 10 }],
+    rect: { x: 0, y: 0, w: 10, h: 10 },
+    closed: false,
+  };
+  assert.equal(buildLineNode(spec), null);
+});
+
+test('line node: empty-string stroke → null', () => {
+  const spec: CustGeomSpec = {
+    points: [{ x: 0, y: 0 }, { x: 10, y: 10 }],
+    rect: { x: 0, y: 0, w: 10, h: 10 },
+    closed: false,
+    stroke: '',
+  };
+  assert.equal(buildLineNode(spec), null);
+});
+
 // ─── fill node ──────────────────────────────────────────────────────────────
 
 test('fill node: solid color', () => {

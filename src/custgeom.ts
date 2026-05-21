@@ -97,10 +97,14 @@ export function buildCustGeomNode(spec: CustGeomSpec): any {
 // 2026-05-21. Our IRCurvePath only carries `endArrow` (mirroring the SVG
 // `marker-end` semantics + IRShape `endArrow` on linear lines), so emitting
 // `<a:tailEnd>` is correct.
-export function buildLineNode(spec: CustGeomSpec): any {
-  if (!spec.stroke) {
-    return { 'a:ln': [{ 'a:noFill': [] }], ':@': { '@_w': String(Math.max(1, Math.round((spec.strokeWidth || 1) * EMU_PER_PX))) } };
-  }
+//
+// Returns `null` when the spec has no stroke — the caller should omit
+// `<a:ln>` entirely. PowerPoint treats a missing `<a:ln>` as "no line",
+// which is what we want; emitting `<a:ln w="N"><a:noFill/></a:ln>` is
+// noise (width is moot when the line is invisible) and the explicit
+// `<a:noFill/>` adds nothing PowerPoint doesn't infer from absence.
+export function buildLineNode(spec: CustGeomSpec): any | null {
+  if (!spec.stroke) return null;
   const lnKids: any[] = [
     { 'a:solidFill': [{ 'a:srgbClr': [], ':@': { '@_val': hex(spec.stroke) } }] },
   ];

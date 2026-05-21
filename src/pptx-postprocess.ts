@@ -292,7 +292,8 @@ function rewritePlaceholderShape(node: any, spec: CustGeomSpec): any {
       const fillNode = buildFillNode(spec);
       if (fillNode) kept.push(fillNode);
       else kept.push({ 'a:noFill': [] });
-      kept.push(buildLineNode(spec));
+      const lineNode = buildLineNode(spec);
+      if (lineNode) kept.push(lineNode);
       c[k] = kept;
     }
   }
