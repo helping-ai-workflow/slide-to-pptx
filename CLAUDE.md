@@ -70,6 +70,54 @@ scripts/postinstall.cjs  # auto-install Chromium after npm install
 mechanical gate. The publish workflow's `npm test` step is a no-op
 (`node -e "console.log('no tests yet')"`).
 
+## Design principle: trust the browser, don't reimplement it
+
+The plugin's job is to **transcribe** what the browser already laid out
+into a pptx, not to **recompute** the layout. Every time the plugin
+reimplements something the browser already does, it ships a class of
+bugs that surface deck-by-deck (missing CSS feature, missing SVG path
+command, missing transform, missing viewBox, etc.).
+
+Concrete rules when extracting from the DOM in `src/extract-pw.ts` (the
+Playwright `page.evaluate` script):
+
+| Asking for | Use | NOT |
+|---|---|---|
+| Element screen position / size | `el.getBoundingClientRect()` | computed from attributes |
+| Computed style (color, font, padding…) | `getComputedStyle(el)` | parsing CSS strings yourself |
+| SVG path geometry as polyline | `el.getTotalLength()` + `el.getPointAtLength(t)` + `pt.matrixTransform(el.getScreenCTM())` | hand-rolled parser of `d="..."` |
+| SVG primitive (line / polyline / rect endpoint) in screen space | `el.createSVGPoint(); pt.x=…; pt.matrixTransform(el.getScreenCTM())` | `svgRect.left + x1` (ignores viewBox + parent transforms) |
+| DOM parent / ancestor / sibling | `el.closest(...)`, `el.parentElement`, `el.children` | manual tree walk |
+
+**Why this matters.** The browser already executed every CSS rule, every
+SVG `viewBox`, every `<g transform="...">`, every CSS `transform: ...`,
+every parent matrix. Asking the browser is correct by construction. The
+moment the plugin starts parsing attribute strings to recompute a
+coordinate, the result drifts from what the user sees in Chromium.
+
+**Pattern to avoid: "parse the attribute, do the math".** If you find
+yourself writing a regex over a CSS-spec or SVG-spec string in order to
+derive a geometric quantity, stop. The browser exposes an API for it.
+Examples from past Plan B-D bugs:
+
+- Plan B implemented `parsePathD` to parse `<path d="...">` into line
+  segments. Plan D extended it to support A/S/T commands. Both worked
+  for paths with positive coordinates, but silently mis-rendered paths
+  with negative coordinates because the math added `svgRect.left + x`
+  while the actual screen position required a viewBox-aware transform.
+  Plan E replaced the whole parser with `getPointAtLength` +
+  `getScreenCTM` — one helper, all SVG path commands handled, every
+  viewBox / parent-transform case correct.
+
+**Acceptable exceptions.** Parsing CSS strings for non-geometric
+properties is fine: colors (`rgb(...)` → hex), shadow specs, gradient
+stops. The browser exposes these only as serialized strings, so parsing
+is the only path. The line is: parsing for **representation conversion**
+is OK; parsing to **redo geometry** is not.
+
+**When in doubt:** if the answer to "could the browser compute this
+directly?" is yes, use the browser API.
+
 ## Visual verification: pptx → PNG via Windows PowerPoint (WSL)
 
 Env is WSL with Microsoft PowerPoint installed at
