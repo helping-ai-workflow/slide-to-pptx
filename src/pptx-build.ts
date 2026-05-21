@@ -2,7 +2,8 @@ import pptxgen from 'pptxgenjs';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { IRGroup, IRImage, IRItem, IRPage, IRRichText, IRShape, IRDecorBox, Run } from './types.js';
+import type { IRGroup, IRImage, IRItem, IRPage, IRRichText, IRShape, IRDecorBox, IRCurvePath, Run } from './types.js';
+import type { CustGeomSpec } from './custgeom.js';
 
 const FONT_MAP = {
   mono: 'JetBrains Mono',
@@ -170,6 +171,36 @@ function renderShape(
   }
 }
 
+function renderCurvePath(
+  slide: pptxgen.Slide,
+  it: IRCurvePath,
+  groupChain: string[] | null,
+  customGeoms: CustGeomSpec[],
+) {
+  const x = px(it.rect.x), y = py(it.rect.y);
+  // Clamp to a hairline if bbox collapses; postprocess uses the IR rect for
+  // its world-space coords, but pptxgenjs needs >0 width/height to even emit.
+  const w = Math.max(px(it.rect.w), 0.01);
+  const h = Math.max(py(it.rect.h), 0.01);
+  const name = `__cust__${customGeoms.length}__${nameFor(groupChain, it.id)}`;
+  slide.addShape('rect', {
+    x, y, w, h,
+    fill: { type: 'none' as const },
+    line: { type: 'none' as const },
+    objectName: name,
+  } as any);
+  customGeoms.push({
+    points: it.points,
+    rect: it.rect,
+    closed: it.closed,
+    fill: it.fill,
+    stroke: it.stroke,
+    strokeWidth: it.strokeWidth,
+    dashed: it.dashed,
+    endArrow: it.endArrow,
+  });
+}
+
 function renderDecor(
   slide: pptxgen.Slide,
   it: IRDecorBox,
@@ -238,6 +269,7 @@ function renderItem(
   it: IRItem,
   groupChain: string[],
   assetRoot: string,
+  customGeoms: CustGeomSpec[],
 ) {
   if ((it as any).classification?.kind === 'ImageFallback'
       && emitFallbackImage(slide, it as any)) {
@@ -246,17 +278,23 @@ function renderItem(
   switch (it.kind) {
     case 'Group': {
       const chain = [...groupChain, it.id];
-      for (const child of it.children) renderItem(slide, child, chain, assetRoot);
+      for (const child of it.children) renderItem(slide, child, chain, assetRoot, customGeoms);
       return;
     }
     case 'Shape': renderShape(slide, it, groupChain); return;
+    case 'CurvePath': renderCurvePath(slide, it, groupChain, customGeoms); return;
     case 'RichText': renderRichText(slide, it, groupChain); return;
     case 'Decor': renderDecor(slide, it, groupChain); return;
     case 'Image': renderImage(slide, it, groupChain, assetRoot); return;
   }
 }
 
-export async function buildPptx(pages: IRPage[], outPath: string, assetRoot = process.cwd(), design?: any) {
+export async function buildPptx(
+  pages: IRPage[],
+  outPath: string,
+  assetRoot = process.cwd(),
+  design?: any,
+): Promise<{ customGeomsPerSlide: CustGeomSpec[][] }> {
   const pres = new pptxgen();
   pres.defineLayout({ name: 'CANVAS', width: SLIDE_W_IN, height: SLIDE_H_IN });
   pres.layout = 'CANVAS';
@@ -268,10 +306,14 @@ export async function buildPptx(pages: IRPage[], outPath: string, assetRoot = pr
     if (typeof raw !== 'string') return 'F7F5F0';
     return hex(raw) || 'F7F5F0';
   })();
+  const customGeomsPerSlide: CustGeomSpec[][] = [];
   for (const page of pages) {
     const slide = pres.addSlide();
     slide.background = { color: bgHex };
-    for (const it of page.items) renderItem(slide, it, [], assetRoot);
+    const customGeoms: CustGeomSpec[] = [];
+    for (const it of page.items) renderItem(slide, it, [], assetRoot, customGeoms);
+    customGeomsPerSlide.push(customGeoms);
   }
   await pres.writeFile({ fileName: outPath });
+  return { customGeomsPerSlide };
 }
