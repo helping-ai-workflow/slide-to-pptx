@@ -190,13 +190,17 @@ const EXTRACT_SCRIPT = `(() => {
 
   const images = [];
   for (const img of document.querySelectorAll('img')) {
-    // Use the positioned wrapper as the rect so an image with objectFit:contain
-    // shrinking inside a 540x700 panel still fills the panel in pptx.
-    // Note: do NOT skip imgs inside primitives — every component is tagged
-    // as a primitive, so skipping would drop all <img> elements (logos,
-    // illustrations) that live inside any React component.
-    const wrapper = img.parentElement;
-    const rect = wrapper ? pickRect(wrapper) : pickRect(img);
+    // Trust the browser: img.getBoundingClientRect() is the IMG element's
+    // layout box, which already accounts for natural aspect ratio + any
+    // width/height auto-resolution + CSS object-fit. Using the parent
+    // wrapper's rect and relying on pptxgenjs sizing:contain is
+    // unreliable — PowerPoint silently stretches embedded images to fill
+    // the rect regardless of the sizing hint, distorting icons (see
+    // getting-started AssetsManager logos at 64px tall inside 270x130
+    // flex cells). The IMG's own rect matches what Chromium painted.
+    // Note: do NOT skip imgs inside primitives — every React component
+    // is tagged as a primitive, so skipping would drop all <img>.
+    const rect = pickRect(img);
     images.push({
       rect,
       src: img.getAttribute('src') || '',
