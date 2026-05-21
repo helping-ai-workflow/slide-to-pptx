@@ -88,6 +88,15 @@ export function buildCustGeomNode(spec: CustGeomSpec): any {
   };
 }
 
+// Arrow-end convention: `<a:tailEnd>` is the END arrow (the one drawn at the
+// final path point), `<a:headEnd>` is the BEGIN arrow. This matches what
+// pptxgenjs emits for `addShape('line', { line: { endArrowType: 'triangle' } })`
+// — see node_modules/pptxgenjs/dist/pptxgen.cjs.js around the
+// `slideItemObj.options.line.endArrowType` branch, which writes
+// `<a:tailEnd type="...">`. Verified by tracing through that source on
+// 2026-05-21. Our IRCurvePath only carries `endArrow` (mirroring the SVG
+// `marker-end` semantics + IRShape `endArrow` on linear lines), so emitting
+// `<a:tailEnd>` is correct.
 export function buildLineNode(spec: CustGeomSpec): any {
   if (!spec.stroke) {
     return { 'a:ln': [{ 'a:noFill': [] }], ':@': { '@_w': String(Math.max(1, Math.round((spec.strokeWidth || 1) * EMU_PER_PX))) } };

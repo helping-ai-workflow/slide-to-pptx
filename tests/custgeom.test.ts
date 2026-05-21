@@ -128,6 +128,24 @@ test('line node: stroke only (no dash, no arrow) → no prstDash, no tailEnd', (
   assert.doesNotMatch(xml, /<a:tailEnd/);
 });
 
+// Locks in the established convention: pptxgenjs emits `<a:tailEnd>` for
+// `endArrowType: 'triangle'` (see node_modules/pptxgenjs/dist/pptxgen.cjs.js,
+// the `slideItemObj.options.line.endArrowType` branch). The curved-path
+// custGeom emission must match this — IRCurvePath.endArrow → `<a:tailEnd>`.
+test('line node: endArrow uses <a:tailEnd> (matches pptxgenjs endArrowType)', () => {
+  const spec: CustGeomSpec = {
+    points: [{ x: 0, y: 0 }, { x: 10, y: 10 }],
+    rect: { x: 0, y: 0, w: 10, h: 10 },
+    closed: false,
+    stroke: '#000000',
+    endArrow: true,
+  };
+  const xml = render(buildLineNode(spec));
+  assert.match(xml, /<a:tailEnd type="triangle"\/>/);
+  // Must NOT emit headEnd — that's the BEGIN arrow per pptxgenjs convention.
+  assert.doesNotMatch(xml, /<a:headEnd/);
+});
+
 // ─── fill node ──────────────────────────────────────────────────────────────
 
 test('fill node: solid color', () => {
