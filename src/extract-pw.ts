@@ -22,6 +22,13 @@ export type PrimMeasure = {
   svgOffset: { x: number; y: number } | null;
   props: Record<string, any>;
   parentId: string | null;    // NEW — closest enclosing primitive id
+  // When the primitive's root element has a CSS feature that the native
+  // emit path cannot reproduce (linear-gradient / radial-gradient / url()
+  // background, etc.), set to a data: URL of the whole primitive's
+  // rendering. measureToIR then emits a single Image leaf in place of the
+  // group and suppresses every descendant leaf (which is already baked
+  // into the screenshot).
+  fallbackImageDataUrl?: string;
 };
 
 export type TextLeaf = {
@@ -129,16 +136,33 @@ const EXTRACT_SCRIPT = `(() => {
     return { x: r.left, y: r.top, w, h: r.height };
   };
 
+  // Background images that the native decor emitter cannot reproduce:
+  // CSS gradients (linear, radial, conic) and url() backgrounds. When the
+  // primitive's root element carries one of these, the only honest path is
+  // to screenshot the whole primitive and embed the PNG. Solid background-
+  // color values still flow through the native decor path.
+  const hasNonNativeBackground = (cs) => {
+    const bi = cs.backgroundImage || '';
+    if (!bi || bi === 'none') return false;
+    // Be generous: any gradient or url() syntax counts. The browser
+    // computed-style serialises these identifiers verbatim.
+    if (bi.includes('gradient(')) return true;
+    if (bi.includes('url(')) return true;
+    return false;
+  };
+
   const PRIM_ELEMENTS = Array.from(document.querySelectorAll('[data-prim-id]'));
   const primitives = PRIM_ELEMENTS.map((el) => {
     const svg = el.closest('svg');
     const svgRect = svg ? svg.getBoundingClientRect() : null;
+    const cs = getComputedStyle(el);
     return {
       id: el.getAttribute('data-prim-id'),
       name: el.getAttribute('data-prim-name'),
       rect: pickRect(el),
       svgOffset: svgRect ? { x: svgRect.left, y: svgRect.top } : null,
       parentId: el.parentElement?.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null,
+      needsFallback: hasNonNativeBackground(cs),
     };
   });
 
@@ -687,21 +711,17 @@ export async function measureSlide(
       await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
       const raw = await page.evaluate(EXTRACT_SCRIPT);
       const r = raw as { primitives: any[]; texts: TextLeaf[]; images: ImageLeaf[]; decors: DecorBox[]; svgShapes: SvgShape[] };
-      const primitives = r.primitives.map((entry: any) => {
-        const rec = propsById.get(entry.id);
-        return {
-          id: entry.id,
-          name: entry.name,
-          rect: entry.rect,
-          svgOffset: entry.svgOffset,
-          props: rec?.props ?? {},
-          parentId: entry.parentId,
-        } as PrimMeasure;
-      });
       // Element-screenshot pass: any leaf that the classifier promotes to
       // ImageFallback needs a pixel rendering to embed in the pptx.
+      // Primitives whose root element has a non-native background (gradient
+      // or url()) are also captured here so measureToIR can substitute the
+      // entire group with an Image leaf.
       const { classifyLeaf } = await import('./classifier.js');
       const leavesToFallback: Array<{ kind: 'text' | 'decor' | 'svg'; leafId: string; index: number }> = [];
+      const primsToFallback: Array<{ primId: string; index: number }> = [];
+      r.primitives.forEach((p: any, i: number) => {
+        if (p.needsFallback) primsToFallback.push({ primId: p.id, index: i });
+      });
       r.texts.forEach((t, i) => {
         const c = classifyLeaf({
           type: 'text',
@@ -759,6 +779,40 @@ export async function measureSlide(
         else if (f.kind === 'decor') r.decors[f.index].fallbackImageDataUrl = url;
         else if (f.kind === 'svg') r.svgShapes[f.index].fallbackImageDataUrl = url;
       }
+
+      // Primitive-level fallback screenshots — one PNG per primitive whose
+      // root element has a non-native background (CSS gradient / url image).
+      // omitBackground:true so the gradient composites against transparency;
+      // the PNG includes every child text/decor so measureToIR drops their
+      // separate leaves.
+      for (const pf of primsToFallback) {
+        const primId = r.primitives[pf.index].id;
+        const locator = page.locator(`[data-prim-id="${primId.replace(/"/g, '\\"')}"]`);
+        try {
+          const buf = await locator.first().screenshot({ omitBackground: true, type: 'png' });
+          (r.primitives[pf.index] as any).fallbackImageDataUrl =
+            `data:image/png;base64,${buf.toString('base64')}`;
+        } catch {
+          // Same fallthrough as leaves: keep the primitive as a normal group
+          // so children still emit natively. Less correct visually but
+          // preserves editability.
+        }
+      }
+
+      // Build the PrimMeasure array AFTER the primitive-level screenshot
+      // pass so fallbackImageDataUrl propagates through to measureToIR.
+      const primitives = r.primitives.map((entry: any) => {
+        const rec = propsById.get(entry.id);
+        return {
+          id: entry.id,
+          name: entry.name,
+          rect: entry.rect,
+          svgOffset: entry.svgOffset,
+          props: rec?.props ?? {},
+          parentId: entry.parentId,
+          fallbackImageDataUrl: entry.fallbackImageDataUrl,
+        } as PrimMeasure;
+      });
 
       out.push({
         pageIndex: p.pageIndex,

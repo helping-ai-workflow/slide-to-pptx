@@ -153,6 +153,16 @@ export function measureToIR(m: PageMeasure): IRPage {
   // Buckets keyed by parent id (null = page root).
   const buckets = new Map<string | null, IRItem[]>();
   const groupById = new Map<string, IRGroup>();
+  // Primitives that are being substituted by an Image leaf (CSS gradient /
+  // url() background — the only honest way to reproduce a multi-stop
+  // gradient in pptx). Any leaf whose closest enclosing primitive is in
+  // this set must be suppressed: its rendering is already baked into the
+  // primitive's screenshot, and emitting it again would double-paint
+  // (white text on top of the gradient that already contains the text).
+  const fallbackPrimIds = new Set<string>();
+  for (const p of m.primitives) {
+    if (p.fallbackImageDataUrl) fallbackPrimIds.add(p.id);
+  }
   const push = (parentId: string | null, item: IRItem) => {
     let arr = buckets.get(parentId);
     if (!arr) { arr = []; buckets.set(parentId, arr); }
@@ -160,7 +170,10 @@ export function measureToIR(m: PageMeasure): IRPage {
   };
 
   // 1) Create empty groups for every primitive — preserves declaration order.
+  //    Primitives flagged for image-fallback skip group creation; they are
+  //    substituted with a single Image leaf in step 3.
   for (const p of m.primitives) {
+    if (fallbackPrimIds.has(p.id)) continue;
     const g: IRGroup = {
       kind: 'Group',
       id: p.id,
@@ -177,6 +190,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   let decorN = 0;
   for (const d of m.decors) {
     if (d.rect.w * d.rect.h > CANVAS_AREA * 0.9) continue;
+    if (d.groupId && fallbackPrimIds.has(d.groupId)) continue; // baked into primitive screenshot
     const decor: IRDecorBox = {
       kind: 'Decor',
       id: `decor-${decorN++}`,
@@ -200,8 +214,27 @@ export function measureToIR(m: PageMeasure): IRPage {
   }
 
   // 3) Place groups under their parent — drawn on top of any decor that
-  //    shares the same bucket.
+  //    shares the same bucket. Fallback'd primitives become a single Image
+  //    leaf at the primitive's rect instead of an editable group.
+  let primImgN = 0;
   for (const p of m.primitives) {
+    if (fallbackPrimIds.has(p.id)) {
+      const img: IRImage = {
+        kind: 'Image',
+        id: `primimg-${primImgN++}`,
+        rect: r(p.rect),
+        src: p.fallbackImageDataUrl!,
+        alt: p.name,
+      };
+      img.domLeafId = p.id;
+      img.classification = {
+        kind: 'ImageFallback',
+        reasons: ['primitive:non-native-background'],
+      };
+      img.fallbackImageDataUrl = p.fallbackImageDataUrl;
+      push(p.parentId, img);
+      continue;
+    }
     const g = groupById.get(p.id)!;
     push(p.parentId, g);
   }
@@ -209,6 +242,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   // 4) Images.
   let imgN = 0;
   for (const im of m.images) {
+    if (im.groupId && fallbackPrimIds.has(im.groupId)) continue;
     const img: IRImage = {
       kind: 'Image',
       id: `img-${imgN++}`,
@@ -231,6 +265,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   for (const t of m.texts) {
     if (!t.text || !t.text.trim()) continue;
     if (t.rect.w <= 0 || t.rect.h <= 0) continue;
+    if (t.groupId && fallbackPrimIds.has(t.groupId)) continue;
     const rich = textLeafToRich(t, `txt-${txtN++}`);
     push(t.groupId, rich);
   }
@@ -248,6 +283,7 @@ export function measureToIR(m: PageMeasure): IRPage {
   }
   const handledLeafIds = new Set<string>();
   for (const s of m.svgShapes) {
+    if (s.groupId && fallbackPrimIds.has(s.groupId)) continue;
     // If this leafId has a fallback image and we haven't handled it yet, emit
     // a single ImageFallback covering the union bbox of all sibling segments
     // and skip the rest of the group.
