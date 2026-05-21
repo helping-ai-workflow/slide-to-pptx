@@ -17,6 +17,32 @@ const VBS = path.join(__dirname, 'visual-regression-render.vbs');
 
 const DEFAULT_THRESHOLD = 0.05;
 
+function loadThresholdConfig() {
+  const configPath = path.join(REPO_ROOT, 'docs', 'visual-regression-thresholds.json');
+  if (!existsSync(configPath)) {
+    return { default: DEFAULT_THRESHOLD, overrides: {} };
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+    return {
+      default: typeof parsed.default === 'number' ? parsed.default : DEFAULT_THRESHOLD,
+      overrides: parsed.overrides && typeof parsed.overrides === 'object' && !Array.isArray(parsed.overrides) ? parsed.overrides : {},
+    };
+  } catch (e) {
+    console.error(`! failed to parse ${configPath}: ${e.message}`);
+    return { default: DEFAULT_THRESHOLD, overrides: {} };
+  }
+}
+
+function thresholdFor(deckName, slideIdx, config) {
+  const o = config.overrides?.[deckName]?.[String(slideIdx)];
+  return typeof o?.max === 'number' ? o.max : config.default;
+}
+
+function overrideFor(deckName, slideIdx, config) {
+  return config.overrides?.[deckName]?.[String(slideIdx)] ?? null;
+}
+
 const CORPUS = [
   { name: 'mac-merge-tx-spec',       path: '/home/user/hp_workspace/my-slide/slides/mac-merge-tx-spec' },
   { name: 'how-i-use-claude-code',   path: '/home/user/hp_workspace/my-slide/slides/how-i-use-claude-code' },
@@ -60,13 +86,13 @@ function diffPair(aPath, bPath, diffOutPath) {
   const a = readPng(aPath);
   const b = readPng(bPath);
   if (a.width !== b.width || a.height !== b.height) {
-    return { ok: false, ratio: 1, reason: `size mismatch: ${a.width}x${a.height} vs ${b.width}x${b.height}` };
+    return { ratio: 1, reason: `size mismatch: ${a.width}x${a.height} vs ${b.width}x${b.height}` };
   }
   const diff = new PNG({ width: a.width, height: a.height });
   const diffPx = pixelmatch(a.data, b.data, diff.data, a.width, a.height, { threshold: 0.1 });
   if (diffOutPath) writeFileSync(diffOutPath, PNG.sync.write(diff));
   const ratio = diffPx / (a.width * a.height);
-  return { ok: ratio <= DEFAULT_THRESHOLD, ratio, diffPx, total: a.width * a.height };
+  return { ratio, diffPx, total: a.width * a.height };
 }
 
 function snapshotFor(deckDir, deckName, slideIdx) {
@@ -90,7 +116,13 @@ async function main() {
   const vbsStaged = path.join(WIN_STAGING_LINUX, 'visual-regression-render.vbs');
   writeFileSync(vbsStaged, readFileSync(VBS));
 
-  const report = { generatedAt: new Date().toISOString(), threshold: DEFAULT_THRESHOLD, decks: [] };
+  const thresholdConfig = loadThresholdConfig();
+  const report = {
+    generatedAt: new Date().toISOString(),
+    threshold: thresholdConfig.default,
+    overrides: thresholdConfig.overrides,
+    decks: [],
+  };
   let anyFail = false;
 
   for (const deck of CORPUS) {
@@ -133,10 +165,24 @@ async function main() {
       }
       const diffOut = path.join(outDirLinux, `diff-${pngName}`);
       const r = diffPair(pptxPng, snapshotPng, diffOut);
-      const tag = r.ok ? '  ok' : 'x FAIL';
-      console.error(`${tag} slide ${slideIdx} diff=${(r.ratio * 100).toFixed(2)}% (${r.diffPx ?? '-'}/${r.total ?? '-'})${r.reason ? ' ' + r.reason : ''}`);
-      pageResults.push({ slideIdx, ratio: r.ratio, ok: r.ok, reason: r.reason });
-      if (!r.ok) anyFail = true;
+      const threshold = thresholdFor(deck.name, slideIdx, thresholdConfig);
+      const override = overrideFor(deck.name, slideIdx, thresholdConfig);
+      const ok = r.ratio <= threshold;
+      const overridePassed = ok && override !== null && r.ratio > thresholdConfig.default;
+      const overrideNote = overridePassed
+        ? ` (override: ${(threshold * 100).toFixed(0)}% ${override.category ?? 'unknown'})`
+        : '';
+      const tag = ok ? '  ok' : 'x FAIL';
+      console.error(`${tag} slide ${slideIdx} diff=${(r.ratio * 100).toFixed(2)}% (${r.diffPx ?? '-'}/${r.total ?? '-'})${overrideNote}${r.reason ? ' ' + r.reason : ''}`);
+      pageResults.push({
+        slideIdx,
+        ratio: r.ratio,
+        ok,
+        threshold,
+        ...(override ? { override: { max: override.max, category: override.category, reason: override.reason } } : {}),
+        reason: r.reason,
+      });
+      if (!ok) anyFail = true;
     }
     report.decks.push({ name: deck.name, pages: pageResults });
   }
@@ -145,7 +191,11 @@ async function main() {
   if (!existsSync(path.dirname(reportPath))) mkdirSync(path.dirname(reportPath), { recursive: true });
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
   console.error(`\nReport written: ${reportPath}`);
-  console.error(`Threshold: ${DEFAULT_THRESHOLD * 100}% pixel-diff`);
+  console.error(`Default threshold: ${thresholdConfig.default * 100}% pixel-diff`);
+  const overrideCount = Object.values(thresholdConfig.overrides).reduce((n, pages) => n + Object.keys(pages).length, 0);
+  if (overrideCount > 0) {
+    console.error(`Per-page overrides loaded: ${overrideCount} pages`);
+  }
   process.exit(anyFail ? 1 : 0);
 }
 

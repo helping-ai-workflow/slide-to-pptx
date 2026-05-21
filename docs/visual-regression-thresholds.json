@@ -1,0 +1,61 @@
+{
+  "default": 0.05,
+  "overrides": {
+    "mac-merge-tx-spec": {
+      "15": {
+        "max": 0.06,
+        "category": "aa-noise",
+        "reason": "sub-pixel anti-aliasing across text"
+      }
+    },
+    "how-i-use-claude-code": {
+      "1": {
+        "max": 0.11,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      },
+      "2": {
+        "max": 0.06,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      },
+      "3": {
+        "max": 0.06,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      },
+      "4": {
+        "max": 0.12,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      },
+      "5": {
+        "max": 0.06,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      },
+      "6": {
+        "max": 0.06,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      },
+      "9": {
+        "max": 0.06,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      },
+      "13": {
+        "max": 0.07,
+        "category": "font-substitution",
+        "reason": "Microsoft JhengHei (PowerPoint) vs Noto Sans CJK (Chromium) glyph-design delta; closure requires <p:embeddedFontLst> font embedding (post-v0.3.0)."
+      }
+    },
+    "svg-viewbox-stress": {
+      "4": {
+        "max": 0.06,
+        "category": "aa-noise",
+        "reason": "rotated rect AA on diagonal edges — Plan G acceptable"
+      }
+    }
+  }
+}
