@@ -73,7 +73,7 @@ export type DecorBox = {
 };
 
 export type SvgShape = {
-  tag: string;          // 'rect' | 'line' | 'polyline' | 'circle' | 'ellipse' | 'text'
+  tag: string;          // 'rect' | 'line' | 'polyline' | 'circle' | 'ellipse' | 'text' | 'curvePath'
   rect: Rect;
   fill?: string;
   stroke?: string;
@@ -83,6 +83,9 @@ export type SvgShape = {
   x1: number; y1: number; x2: number; y2: number;
   points: string;
   markerEnd: string;
+  // Plan J: closed=true when a curvePath's `d` ends with Z/z. Used by the
+  // custGeom emitter to decide whether to write <a:close/>.
+  closed?: boolean;
   text: string;
   fontSize: number;
   fontFamily: string;
@@ -624,6 +627,7 @@ const EXTRACT_SCRIPT = `(() => {
       // for non-skewed CTMs — good enough for sampling granularity.
       const N = Math.max(16, Math.min(256, Math.ceil(totalLen / 8)));
       const stroke = cs.stroke && cs.stroke !== 'none' ? colorRgbToHex(cs.stroke) : '';
+      const fill   = cs.fill   && cs.fill   !== 'none' ? colorRgbToHex(cs.fill)   : '';
       const sw = parsePx(cs.strokeWidth);
       const dashed = !!cs.strokeDasharray && cs.strokeDasharray !== 'none';
       const me = el.getAttribute('marker-end') || '';
@@ -631,27 +635,35 @@ const EXTRACT_SCRIPT = `(() => {
       const samples = [];
       for (let k = 0; k <= N; k++) {
         const userPt = el.getPointAtLength((k * totalLen) / N);
-        samples.push(toScreenPt(el, userPt.x, userPt.y));
+        const sp = toScreenPt(el, userPt.x, userPt.y);
+        samples.push(sp);
       }
-      for (let k = 0; k < samples.length - 1; k++) {
-        const a = samples[k], b = samples[k + 1];
-        svgShapes.push({
-          tag: 'line',
-          rect: {
-            x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
-            w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y),
-          },
-          fill: '', stroke, strokeWidth: sw, dashed,
-          rx: 0,
-          x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-          points: '',
-          markerEnd: k === samples.length - 2 ? me : '',
-          text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
-          ...(svgRootFlags.get(el.closest('svg')) || { hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false }),
-          leafId: leafIdOf(el),
-          groupId: gid,
-        });
-      }
+      // Plan J: emit ONE curvePath svgShape carrying the full sample list.
+      // pptx-build → pptx-postprocess turns this into <a:custGeom> so the
+      // curve appears as a single PowerPoint shape (was N-1 hairline lines).
+      // Closure: detected from the \`d\` attribute's trailing Z/z. This is
+      // command-LETTER inspection per CLAUDE.md "classification vs geometry"
+      // — never reads coordinates from \`d\`.
+      const closed = /[zZ]\\s*$/.test(dAttr);
+      const sxs = samples.map((p) => p.x);
+      const sys = samples.map((p) => p.y);
+      const bx = Math.min(...sxs), by = Math.min(...sys);
+      const bw = Math.max(...sxs) - bx, bh = Math.max(...sys) - by;
+      svgShapes.push({
+        tag: 'curvePath',
+        rect: { x: bx, y: by, w: bw, h: bh },
+        fill, stroke, strokeWidth: sw, dashed,
+        rx: 0,
+        x1: 0, y1: 0, x2: 0, y2: 0,
+        // Reuse the existing \`points\` field — space-separated \`x,y\` pairs.
+        points: samples.map((p) => p.x + ',' + p.y).join(' '),
+        markerEnd: me,
+        closed,
+        text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
+        ...(svgRootFlags.get(el.closest('svg')) || { hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false }),
+        leafId: leafIdOf(el),
+        groupId: gid,
+      });
       continue;
     }
     const rect = pickRect(el);
