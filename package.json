@@ -49,7 +49,7 @@
     "test": "node --import tsx --test $(find tests -name '*.test.ts' -not -name 'corpus.test.ts')",
     "test:corpus": "node --import tsx --test tests/corpus.test.ts",
     "test:all": "node --import tsx --test $(find tests -name '*.test.ts')",
-    "pre-release": "node scripts/visual-regression.mjs",
+    "pre-release": "node --import tsx scripts/visual-regression.mjs",
     "postinstall": "node scripts/postinstall.cjs"
   },
   "repository": {

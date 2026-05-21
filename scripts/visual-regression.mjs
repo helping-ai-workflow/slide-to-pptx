@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
+import { runPostReleaseCheck } from './post-release-check.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -20,17 +21,24 @@ const DEFAULT_THRESHOLD = 0.05;
 function loadThresholdConfig() {
   const configPath = path.join(REPO_ROOT, 'docs', 'visual-regression-thresholds.json');
   if (!existsSync(configPath)) {
-    return { default: DEFAULT_THRESHOLD, overrides: {} };
+    return { default: DEFAULT_THRESHOLD, overrides: {}, postRelease: { default: 0.01, overrides: {} } };
   }
   try {
     const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+    const postRelease = parsed.postRelease && typeof parsed.postRelease === 'object' && !Array.isArray(parsed.postRelease)
+      ? {
+          default: typeof parsed.postRelease.default === 'number' ? parsed.postRelease.default : 0.01,
+          overrides: parsed.postRelease.overrides && typeof parsed.postRelease.overrides === 'object' && !Array.isArray(parsed.postRelease.overrides) ? parsed.postRelease.overrides : {},
+        }
+      : { default: 0.01, overrides: {} };
     return {
       default: typeof parsed.default === 'number' ? parsed.default : DEFAULT_THRESHOLD,
       overrides: parsed.overrides && typeof parsed.overrides === 'object' && !Array.isArray(parsed.overrides) ? parsed.overrides : {},
+      postRelease,
     };
   } catch (e) {
     console.error(`! failed to parse ${configPath}: ${e.message}`);
-    return { default: DEFAULT_THRESHOLD, overrides: {} };
+    return { default: DEFAULT_THRESHOLD, overrides: {}, postRelease: { default: 0.01, overrides: {} } };
   }
 }
 
@@ -187,6 +195,32 @@ async function main() {
     report.decks.push({ name: deck.name, pages: pageResults });
   }
 
+  // Plan K K-3: post-release pixel-diff gate. For each primimg:<srcPrimId>:...
+  // image embedded in the emitted pptx, re-render the source primitive in
+  // isolation and pixel-diff against the embedded PNG. Catches mid-pipeline
+  // contamination (sibling-bake) that whole-image gates cannot detect.
+  process.stderr.write(`\n=== post-release check ===\n`);
+  const postRel = await runPostReleaseCheck(
+    CORPUS.filter((d) => existsSync(d.path)),
+    thresholdConfig,
+  );
+  const postReleasePerDeck = {};
+  for (const r of postRel.results) {
+    const deckBucket = postReleasePerDeck[r.deck] || (postReleasePerDeck[r.deck] = []);
+    deckBucket.push(r);
+    if (r.primimgCount === 0) {
+      console.error(`  ok ${r.deck} (no primimg shapes${r.reason ? ': ' + r.reason : ''})`);
+      continue;
+    }
+    const tag = r.ok ? '  ok' : 'x FAIL';
+    const ratioPct = (r.ratio * 100).toFixed(2);
+    const thresholdPct = (r.threshold * 100).toFixed(1);
+    const reasonNote = r.reason ? ` (${r.reason})` : '';
+    console.error(`${tag} ${r.deck} slide ${r.slide} primimg=${r.srcPrimId} diff=${ratioPct}% (threshold ${thresholdPct}%)${reasonNote}`);
+  }
+  if (postRel.anyFail) anyFail = true;
+  report.postRelease = postReleasePerDeck;
+
   const reportPath = path.join(REPO_ROOT, 'docs', 'visual-regression-baseline.json');
   if (!existsSync(path.dirname(reportPath))) mkdirSync(path.dirname(reportPath), { recursive: true });
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
@@ -195,6 +229,12 @@ async function main() {
   const overrideCount = Object.values(thresholdConfig.overrides).reduce((n, pages) => n + Object.keys(pages).length, 0);
   if (overrideCount > 0) {
     console.error(`Per-page overrides loaded: ${overrideCount} pages`);
+  }
+  console.error(`Post-release default threshold: ${thresholdConfig.postRelease.default * 100}% pixel-diff`);
+  const postReleaseOverrideCount = Object.values(thresholdConfig.postRelease.overrides || {})
+    .reduce((n, prims) => n + Object.keys(prims).length, 0);
+  if (postReleaseOverrideCount > 0) {
+    console.error(`Per-primimg post-release overrides loaded: ${postReleaseOverrideCount} entries`);
   }
   process.exit(anyFail ? 1 : 0);
 }
