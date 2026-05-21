@@ -80,11 +80,10 @@ export type SvgShape = {
   fontSize: number;
   fontFamily: string;
   textAnchor: string;
-  // Structural flags for the classifier. `hasUnsupportedPath` is set when the
-  // parent SVG contains at least one <path d="..."> element whose 'd' attribute
-  // uses commands outside the set parsePathD can handle (e.g. 'A' arcs,
-  // 'S'/'T' smooth bezier shortcuts). When true, the classifier falls back to
-  // an image render for this SVG root.
+  // Structural flags for the classifier. `hasUnsupportedPath` is always false
+  // since Plan E uses getPointAtLength + getScreenCTM to render all path
+  // commands natively (including A/S/T). Field retained for type-shape
+  // compatibility with classifier and measure-to-ir.
   hasUnsupportedPath: boolean;
   hasUse: boolean;
   hasPattern: boolean;
@@ -492,224 +491,25 @@ const EXTRACT_SCRIPT = `(() => {
     }
   }
 
-  // Commands the parsePathD parser can faithfully convert to line segments.
-  // Anything outside this set (typically 'A' for arcs, 'S'/'T' for smooth
-  // bezier shortcuts) cannot be rendered natively and triggers image
-  // fallback at the classifier.
-  const SUPPORTED_PATH_CMDS = new Set(['M','L','H','V','C','Q','S','T','A','Z','m','l','h','v','c','q','s','t','a','z']);
-  const hasUnsupportedPathCommand = (d) => {
-    if (!d) return false;
-    const cmds = d.match(/[a-zA-Z]/g);
-    if (!cmds) return false;
-    for (const c of cmds) if (!SUPPORTED_PATH_CMDS.has(c)) return true;
-    return false;
-  };
-
-  // Parse an SVG <path d="..."> into screen-space line segments.
-  // Supports M/L/H/V/C/Q/S/T/A/Z (abs + rel). A and the smooth bezier
-  // shortcuts S/T are approximated by line-segment discretization, the
-  // same approach used for C/Q. The default N=16 sample density is
-  // visually indistinguishable from native rendering at typical arc
-  // sizes (<= 600px).
-  const parsePathD = (d, svgLeft, svgTop) => {
-    const toks = d.match(/[a-zA-Z]|[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?/g) || [];
-    let i = 0;
-    const num = () => parseFloat(toks[i++]);
-    const isCmd = (t) => /^[a-zA-Z]$/.test(t);
-    const segs = [];
-    let cx = 0, cy = 0, sx = 0, sy = 0;
-    let prevCubicCtrlX = NaN, prevCubicCtrlY = NaN;
-    let prevQuadCtrlX = NaN, prevQuadCtrlY = NaN;
-    let cmd = '';
-    const push = (x1, y1, x2, y2) => segs.push({
-      x1: x1 + svgLeft, y1: y1 + svgTop, x2: x2 + svgLeft, y2: y2 + svgTop,
-    });
-    while (i < toks.length) {
-      if (isCmd(toks[i])) cmd = toks[i++];
-      const rel = cmd === cmd.toLowerCase();
-      const c = cmd.toUpperCase();
-      if (c === 'M') {
-        let x = num(), y = num();
-        if (rel) { x += cx; y += cy; }
-        cx = x; cy = y; sx = x; sy = y;
-        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
-        cmd = rel ? 'l' : 'L'; continue;
-      }
-      if (c === 'L') {
-        let x = num(), y = num();
-        if (rel) { x += cx; y += cy; }
-        push(cx, cy, x, y); cx = x; cy = y;
-        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
-        continue;
-      }
-      if (c === 'H') {
-        let x = num();
-        if (rel) x += cx;
-        push(cx, cy, x, cy); cx = x;
-        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
-        continue;
-      }
-      if (c === 'V') {
-        let y = num();
-        if (rel) y += cy;
-        push(cx, cy, cx, y); cy = y;
-        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
-        continue;
-      }
-      if (c === 'C') {
-        let c1x = num(), c1y = num(), c2x = num(), c2y = num(), ex = num(), ey = num();
-        if (rel) { c1x += cx; c1y += cy; c2x += cx; c2y += cy; ex += cx; ey += cy; }
-        const N = 16;
-        let px = cx, py = cy;
-        for (let k = 1; k <= N; k++) {
-          const t = k / N, it = 1 - t;
-          const bx = it*it*it*cx + 3*it*it*t*c1x + 3*it*t*t*c2x + t*t*t*ex;
-          const by = it*it*it*cy + 3*it*it*t*c1y + 3*it*t*t*c2y + t*t*t*ey;
-          push(px, py, bx, by); px = bx; py = by;
-        }
-        prevCubicCtrlX = c2x; prevCubicCtrlY = c2y;
-        prevQuadCtrlX = NaN; prevQuadCtrlY = NaN;
-        cx = ex; cy = ey; continue;
-      }
-      if (c === 'Q') {
-        let cpx = num(), cpy = num(), ex = num(), ey = num();
-        if (rel) { cpx += cx; cpy += cy; ex += cx; ey += cy; }
-        const N = 12;
-        let px = cx, py = cy;
-        for (let k = 1; k <= N; k++) {
-          const t = k / N, it = 1 - t;
-          const bx = it*it*cx + 2*it*t*cpx + t*t*ex;
-          const by = it*it*cy + 2*it*t*cpy + t*t*ey;
-          push(px, py, bx, by); px = bx; py = by;
-        }
-        prevQuadCtrlX = cpx; prevQuadCtrlY = cpy;
-        prevCubicCtrlX = NaN; prevCubicCtrlY = NaN;
-        cx = ex; cy = ey; continue;
-      }
-      if (c === 'Z') {
-        push(cx, cy, sx, sy); cx = sx; cy = sy;
-        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
-        continue;
-      }
-      if (c === 'S') {
-        let c2x = num(), c2y = num(), ex = num(), ey = num();
-        if (rel) { c2x += cx; c2y += cy; ex += cx; ey += cy; }
-        const c1x = isNaN(prevCubicCtrlX) ? cx : (2 * cx - prevCubicCtrlX);
-        const c1y = isNaN(prevCubicCtrlY) ? cy : (2 * cy - prevCubicCtrlY);
-        const N = 16;
-        let px = cx, py = cy;
-        for (let k = 1; k <= N; k++) {
-          const t = k / N, it = 1 - t;
-          const bx = it*it*it*cx + 3*it*it*t*c1x + 3*it*t*t*c2x + t*t*t*ex;
-          const by = it*it*it*cy + 3*it*it*t*c1y + 3*it*t*t*c2y + t*t*t*ey;
-          push(px, py, bx, by); px = bx; py = by;
-        }
-        prevCubicCtrlX = c2x; prevCubicCtrlY = c2y;
-        prevQuadCtrlX = NaN; prevQuadCtrlY = NaN;
-        cx = ex; cy = ey; continue;
-      }
-      if (c === 'T') {
-        let ex = num(), ey = num();
-        if (rel) { ex += cx; ey += cy; }
-        const cpx = isNaN(prevQuadCtrlX) ? cx : (2 * cx - prevQuadCtrlX);
-        const cpy = isNaN(prevQuadCtrlY) ? cy : (2 * cy - prevQuadCtrlY);
-        const N = 12;
-        let px = cx, py = cy;
-        for (let k = 1; k <= N; k++) {
-          const t = k / N, it = 1 - t;
-          const bx = it*it*cx + 2*it*t*cpx + t*t*ex;
-          const by = it*it*cy + 2*it*t*cpy + t*t*ey;
-          push(px, py, bx, by); px = bx; py = by;
-        }
-        prevQuadCtrlX = cpx; prevQuadCtrlY = cpy;
-        prevCubicCtrlX = NaN; prevCubicCtrlY = NaN;
-        cx = ex; cy = ey; continue;
-      }
-      if (c === 'A') {
-        let rx = Math.abs(num()), ry = Math.abs(num());
-        const xAxisRotDeg = num();
-        const largeArc = num() !== 0;
-        const sweep = num() !== 0;
-        let ex = num(), ey = num();
-        if (rel) { ex += cx; ey += cy; }
-
-        if (rx === 0 || ry === 0 || (cx === ex && cy === ey)) {
-          push(cx, cy, ex, ey);
-          prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
-          cx = ex; cy = ey; continue;
-        }
-
-        const phi = (xAxisRotDeg * Math.PI) / 180;
-        const cosPhi = Math.cos(phi), sinPhi = Math.sin(phi);
-        const dx = (cx - ex) / 2, dy = (cy - ey) / 2;
-        const x1p =  cosPhi * dx + sinPhi * dy;
-        const y1p = -sinPhi * dx + cosPhi * dy;
-
-        const lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
-        if (lambda > 1) {
-          const sqrtL = Math.sqrt(lambda);
-          rx *= sqrtL;
-          ry *= sqrtL;
-        }
-
-        const sign = largeArc === sweep ? -1 : 1;
-        const numer = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
-        const denom = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
-        const factor = denom === 0 ? 0 : sign * Math.sqrt(Math.max(0, numer / denom));
-
-        const cxp = factor * (rx * y1p) / ry;
-        const cyp = factor * -(ry * x1p) / rx;
-
-        const acx = cosPhi * cxp - sinPhi * cyp + (cx + ex) / 2;
-        const acy = sinPhi * cxp + cosPhi * cyp + (cy + ey) / 2;
-
-        const ang = (ux, uy, vx, vy) => {
-          const dot = ux * vx + uy * vy;
-          const len = Math.sqrt((ux * ux + uy * uy) * (vx * vx + vy * vy));
-          let a = Math.acos(Math.max(-1, Math.min(1, len === 0 ? 1 : dot / len)));
-          if (ux * vy - uy * vx < 0) a = -a;
-          return a;
-        };
-
-        const theta1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
-        let delta = ang(
-          (x1p - cxp) / rx, (y1p - cyp) / ry,
-          (-x1p - cxp) / rx, (-y1p - cyp) / ry,
-        );
-        if (!sweep && delta > 0) delta -= 2 * Math.PI;
-        if (sweep && delta < 0) delta += 2 * Math.PI;
-
-        const arcLen = Math.abs(delta) * Math.max(rx, ry);
-        const N = Math.max(8, Math.min(64, Math.ceil(arcLen / 16)));
-        let px = cx, py = cy;
-        for (let k = 1; k <= N; k++) {
-          const t = theta1 + (delta * k) / N;
-          const ptX = cosPhi * (rx * Math.cos(t)) - sinPhi * (ry * Math.sin(t)) + acx;
-          const ptY = sinPhi * (rx * Math.cos(t)) + cosPhi * (ry * Math.sin(t)) + acy;
-          push(px, py, ptX, ptY);
-          px = ptX; py = ptY;
-        }
-        prevCubicCtrlX = prevCubicCtrlY = prevQuadCtrlX = prevQuadCtrlY = NaN;
-        cx = ex; cy = ey; continue;
-      }
-      break;
-    }
-    return segs;
+  // Plan E: convert SVG user-space coordinates to screen-space using
+  // getScreenCTM(). This handles viewBox transforms, parent <g transform>,
+  // and CSS transforms on the SVG element — everything parsePathD missed.
+  const toScreenPt = (el, x, y) => {
+    const ctm = el.getScreenCTM();
+    if (!ctm) return { x, y };
+    const svg = el.ownerSVGElement || el;
+    const pt = svg.createSVGPoint();
+    pt.x = x; pt.y = y;
+    const out = pt.matrixTransform(ctm);
+    return { x: out.x, y: out.y };
   };
 
   const svgShapes = [];
   const SVG_TAGS = new Set(['rect','line','polyline','circle','ellipse','text','path']);
   const svgRootFlags = new WeakMap();
   for (const svg of document.querySelectorAll('svg')) {
-    let hasUnsupportedPath = false;
-    for (const p of svg.querySelectorAll('path')) {
-      if (hasUnsupportedPathCommand(p.getAttribute('d'))) {
-        hasUnsupportedPath = true;
-        break;
-      }
-    }
     svgRootFlags.set(svg, {
-      hasUnsupportedPath,
+      hasUnsupportedPath: false, // Plan E: getPointAtLength handles all path commands natively.
       hasUse:     !!svg.querySelector('use'),
       hasPattern: !!svg.querySelector('pattern'),
       hasMask:    !!svg.querySelector('mask'),
@@ -723,31 +523,35 @@ const EXTRACT_SCRIPT = `(() => {
     if (el.closest('marker, defs')) continue;
     const cs = getComputedStyle(el);
     if (tag === 'path') {
-      const d = el.getAttribute('d') || '';
-      if (!d.trim()) continue;
-      const svgEl = el.closest('svg');
-      if (!svgEl) continue;
-      const svgRect = svgEl.getBoundingClientRect();
-      const segs = parsePathD(d, svgRect.left, svgRect.top);
-      if (segs.length === 0) continue;
+      const totalLen = el.getTotalLength ? el.getTotalLength() : 0;
+      if (totalLen <= 0) continue;
+      // Sample density: ~one segment per 8 screen-pixels along the path.
+      // getTotalLength returns user-space length; proportional to screen length
+      // for non-skewed CTMs — good enough for sampling granularity.
+      const N = Math.max(16, Math.min(256, Math.ceil(totalLen / 8)));
       const stroke = cs.stroke && cs.stroke !== 'none' ? colorRgbToHex(cs.stroke) : '';
       const sw = parsePx(cs.strokeWidth);
       const dashed = !!cs.strokeDasharray && cs.strokeDasharray !== 'none';
       const me = el.getAttribute('marker-end') || '';
       const gid = el.closest('[data-prim-id]')?.getAttribute('data-prim-id') || null;
-      for (let k = 0; k < segs.length; k++) {
-        const s = segs[k];
+      const samples = [];
+      for (let k = 0; k <= N; k++) {
+        const userPt = el.getPointAtLength((k * totalLen) / N);
+        samples.push(toScreenPt(el, userPt.x, userPt.y));
+      }
+      for (let k = 0; k < samples.length - 1; k++) {
+        const a = samples[k], b = samples[k + 1];
         svgShapes.push({
           tag: 'line',
           rect: {
-            x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2),
-            w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1),
+            x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+            w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y),
           },
           fill: '', stroke, strokeWidth: sw, dashed,
           rx: 0,
-          x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2,
+          x1: a.x, y1: a.y, x2: b.x, y2: b.y,
           points: '',
-          markerEnd: k === segs.length - 1 ? me : '',
+          markerEnd: k === samples.length - 2 ? me : '',
           text: '', fontSize: 0, fontFamily: '', textAnchor: 'start',
           ...(svgRootFlags.get(el.closest('svg')) || { hasUnsupportedPath: false, hasUse: false, hasPattern: false, hasMask: false }),
           leafId: leafIdOf(el),
@@ -763,16 +567,26 @@ const EXTRACT_SCRIPT = `(() => {
     const y1 = parseFloat(el.getAttribute('y1') || '0');
     const x2 = parseFloat(el.getAttribute('x2') || '0');
     const y2 = parseFloat(el.getAttribute('y2') || '0');
+    // Site 2: transform <line> endpoints via getScreenCTM instead of
+    // adding raw svgRect.left/top (which ignores viewBox transforms).
     let lineEndpoints = null;
     if (tag === 'line') {
-      const svgEl = el.closest('svg');
-      if (svgEl) {
-        const svgRect = svgEl.getBoundingClientRect();
-        lineEndpoints = {
-          sx1: svgRect.left + x1, sy1: svgRect.top + y1,
-          sx2: svgRect.left + x2, sy2: svgRect.top + y2,
-        };
+      const a = toScreenPt(el, x1, y1);
+      const b = toScreenPt(el, x2, y2);
+      lineEndpoints = { sx1: a.x, sy1: a.y, sx2: b.x, sy2: b.y };
+    }
+    // Site 3: transform <polyline> points via getScreenCTM so that
+    // user-space coordinates with viewBox offsets are correct.
+    let screenPoints = '';
+    if (tag === 'polyline') {
+      const raw = el.getAttribute('points') || '';
+      const nums = raw.trim().split(/[\\s,]+/).map(parseFloat).filter((v) => !isNaN(v));
+      const out = [];
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const p = toScreenPt(el, nums[i], nums[i + 1]);
+        out.push(p.x + ',' + p.y);
       }
+      screenPoints = out.join(' ');
     }
     svgShapes.push({
       tag,
@@ -786,7 +600,7 @@ const EXTRACT_SCRIPT = `(() => {
       y1: lineEndpoints?.sy1 ?? y1,
       x2: lineEndpoints?.sx2 ?? x2,
       y2: lineEndpoints?.sy2 ?? y2,
-      points: el.getAttribute('points') || '',
+      points: tag === 'polyline' ? screenPoints : (el.getAttribute('points') || ''),
       markerEnd: el.getAttribute('marker-end') || '',
       text: tag === 'text' ? (el.textContent || '').trim() : '',
       fontSize: parsePx(cs.fontSize),
