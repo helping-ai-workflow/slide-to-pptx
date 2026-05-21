@@ -131,10 +131,11 @@ pptx-affecting fix works:
 
 ### Test/tsc gates
 
-- `npm test` — current baseline 44/44 (28 after Plan H2, then 28 → 44
-  with Plan I's 16 classifier tests in `tests/shape-classify.test.ts`).
-  Implementers update this count when they add tests; reviewers verify
-  the count claim.
+- `npm test` — current baseline 57/57 (28 after Plan H2, 28 → 44 with
+  Plan I's 16 classifier tests in `tests/shape-classify.test.ts`,
+  44 → 57 with Plan J's 13 custGeom-builder tests in
+  `tests/custgeom.test.ts`). Implementers update this count when they
+  add tests; reviewers verify the count claim.
 - `npx tsc --noEmit` — must be clean.
 - `npm run pre-release` — full corpus visual regression, ~3-5 min via
   PowerPoint COM. Required before tagging a release; recommended after
@@ -208,9 +209,10 @@ src/
   render-html.ts         # renderToStaticMarkup → standalone HTML per page
   extract-pw.ts          # headless Chromium measure (rect, text, SVG, decor)
   shape-classify.ts      # pure point-list → line / rect / polyline classifier
+  custgeom.ts            # pure builder for <a:custGeom> OOXML AST node
   measure-to-ir.ts       # measurements → IR tree
-  pptx-build.ts          # IR → pptxgenjs
-  pptx-postprocess.ts    # rewrite XML to wrap each component in p:grpSp
+  pptx-build.ts          # IR → pptxgenjs (curves emit as __cust__N__ placeholders)
+  pptx-postprocess.ts    # rewrite XML — group p:grpSp, swap __cust__ placeholders to custGeom, CJK font
 bin/slide-to-pptx.cjs    # CLI entrypoint (spawns tsx)
 scripts/postinstall.cjs  # auto-install Chromium after npm install
 .github/workflows/publish.yml  # tag → npm publish
@@ -292,12 +294,44 @@ N-segment sampling because pptxgenjs has no `custGeom` API. The classifier
 itself is pure and works only on screen-space `{x, y}` points the browser
 has already produced.
 
-### Deferred: curves as a single shape
+### Curves: ONE shape via `<a:custGeom>` (Plan J)
 
-Curved `<path>` elements (any `C/S/Q/T/A` command) still emit as N-1
-hairline line shapes — same visual, ugly editability. The right primitive
-is OOXML `<a:custGeom>` written via `pptx-postprocess.ts` (pptxgenjs has
-no API for it). Tracked for a future plan; not Plan I scope.
+Curved `<path>` elements (any `C/S/Q/T/A` command) emit as ONE PowerPoint
+shape via OOXML `<a:custGeom>`, polyline-approximated at the same sampling
+density as v0.3.1 (16–256 points via `getPointAtLength`). pptxgenjs has no
+`custGeom` API, so the pipeline uses a placeholder strategy:
+
+1. `src/extract-pw.ts` curved-path branch emits ONE `tag:'curvePath'`
+   svgShape carrying the full screen-space sample list + style metadata.
+2. `src/measure-to-ir.ts` routes it to a `kind: 'CurvePath'` IR item.
+3. `src/pptx-build.ts` emits each `CurvePath` as a placeholder rect via
+   `addShape('rect', { objectName: '__cust__N__...' })` and accumulates
+   `CustGeomSpec[]` per slide. `buildPptx` returns the spec table.
+4. `src/cli.ts` threads `customGeomsPerSlide` into `postprocessPptx`.
+5. `src/pptx-postprocess.ts` finds shapes by `__cust__N__` name prefix,
+   strips the prefix, keeps the `<a:xfrm>`, and replaces the geometry +
+   line + fill children with `<a:custGeom>` + `<a:ln>` + `<a:solidFill>`
+   built by `src/custgeom.ts`. The rewrite runs BEFORE `processSpTree`
+   so the renamed curves participate in primitive grouping with siblings.
+
+OOXML conventions confirmed against pptxgenjs's own emission:
+- End-arrow uses `<a:tailEnd type="triangle"/>` (NOT `<a:headEnd>` —
+  pptxgenjs maps `endArrowType` to `tailEnd`; the convention is locked
+  in by `tests/custgeom.test.ts`).
+- When stroke is absent, omit `<a:ln>` entirely (don't emit
+  `<a:ln w="N"><a:noFill/></a:ln>`).
+- `<a:path>` coordinates are local 0..100000; world-space lives in
+  `<a:xfrm>`.
+
+### Deferred: true cubic-bezier control points
+
+Plan J's polyline approximation is pixel-identical to v0.3.1 (same
+samples, just wrapped as ONE shape). A future plan could read actual
+cubic / quadratic control points via `SVGGeometryElement.getPathData()`
+and emit `<a:cubicBezTo>` / `<a:quadBezTo>` for a vector-perfect curve.
+Visual gain is zero on the current corpus (the polyline is already at
+8-px sampling — well below diff-detection); editability gain is minor
+(curves are ALREADY one shape now). Lower priority — file when needed.
 
 ## Visual verification: pptx → PNG via Windows PowerPoint (WSL)
 
