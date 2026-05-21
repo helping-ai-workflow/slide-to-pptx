@@ -26,7 +26,7 @@ function loadThresholdConfig() {
     const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
     return {
       default: typeof parsed.default === 'number' ? parsed.default : DEFAULT_THRESHOLD,
-      overrides: parsed.overrides && typeof parsed.overrides === 'object' ? parsed.overrides : {},
+      overrides: parsed.overrides && typeof parsed.overrides === 'object' && !Array.isArray(parsed.overrides) ? parsed.overrides : {},
     };
   } catch (e) {
     console.error(`! failed to parse ${configPath}: ${e.message}`);
