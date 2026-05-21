@@ -131,9 +131,10 @@ pptx-affecting fix works:
 
 ### Test/tsc gates
 
-- `npm test` — current baseline 28/28 (was 19 before Plan H2's
-  `tests/pptx-postprocess.test.ts`). Implementers update this count
-  when they add tests; reviewers verify the count claim.
+- `npm test` — current baseline 44/44 (28 after Plan H2, then 28 → 44
+  with Plan I's 16 classifier tests in `tests/shape-classify.test.ts`).
+  Implementers update this count when they add tests; reviewers verify
+  the count claim.
 - `npx tsc --noEmit` — must be clean.
 - `npm run pre-release` — full corpus visual regression, ~3-5 min via
   PowerPoint COM. Required before tagging a release; recommended after
@@ -158,6 +159,27 @@ pptx-affecting fix works:
 - No plan/spec docs committed under `docs/superpowers/{plans,specs}/`.
 - Release commit only touches `package.json` + `package-lock.json`; never
   bundle code changes into a `release: vX.Y.Z` commit.
+
+### CLAUDE.md is part of plan completion
+
+After every plan merges, before tagging the release, the controller MUST
+update CLAUDE.md to reflect anything that changed:
+
+- New source files → "Layout" section.
+- New module-level invariants or principles → relevant principle section.
+- Test count baseline (`npm test` N/N) → "Test/tsc gates".
+- Permanent process refinements discovered during the plan → "Development
+  workflow" or "Hard rules".
+
+This is a gate, not a nice-to-have. CLAUDE.md is what bootstraps the next
+session — a stale CLAUDE.md silently de-skills every future agent. Plan I
+shipped to npm before this rule existed and CLAUDE.md was left stale; the
+user caught it. Don't repeat.
+
+The CLAUDE.md update itself follows the same flow as any other change —
+feature branch, PR (title `docs(CLAUDE): <subject> (Plan X aftermath)`),
+review, `--merge --delete-branch`. It is NOT a release commit and is NOT
+bundled into the `release: vX.Y.Z` commit.
 
 ## Playwright Chromium
 
@@ -185,6 +207,7 @@ src/
   instrument.tsx         # tag primitive roots with data-prim-id
   render-html.ts         # renderToStaticMarkup → standalone HTML per page
   extract-pw.ts          # headless Chromium measure (rect, text, SVG, decor)
+  shape-classify.ts      # pure point-list → line / rect / polyline classifier
   measure-to-ir.ts       # measurements → IR tree
   pptx-build.ts          # IR → pptxgenjs
   pptx-postprocess.ts    # rewrite XML to wrap each component in p:grpSp
@@ -195,9 +218,10 @@ scripts/postinstall.cjs  # auto-install Chromium after npm install
 
 ## Typecheck
 
-`npx tsc --noEmit` — repo has no test suite, so this is the only
-mechanical gate. The publish workflow's `npm test` step is a no-op
-(`node -e "console.log('no tests yet')"`).
+`npx tsc --noEmit` is one of the mechanical gates. Unit tests
+(`npm test`, currently 44 / 44 via `node:test`) are the other. The publish
+workflow's `npm test` step is a no-op stub — actual test enforcement
+happens in the dev loop (see "Development workflow" → "Test/tsc gates").
 
 ## Design principle: trust the browser, don't reimplement it
 
@@ -246,6 +270,34 @@ is OK; parsing to **redo geometry** is not.
 
 **When in doubt:** if the answer to "could the browser compute this
 directly?" is yes, use the browser API.
+
+### Corollary: classification vs geometry
+
+There IS a legitimate kind of attribute-string inspection: reading the
+command-LETTER stream from `<path d="...">` to decide whether a path is
+linear-only (M/L/H/V/Z) or contains curves (C/S/Q/T/A). That is
+classification, not geometry — the letters are the path's TYPE, not its
+shape. Once the type is known, the actual coordinates STILL come from
+`getPointAtLength` + `getScreenCTM`. The split:
+
+| Inspecting `d` for... | OK? | Why |
+|---|---|---|
+| Command letters (regex `/[a-zA-Z]/g`) | yes | type classification, never geometry |
+| Coordinate numbers (any `parseFloat` of `d`) | NO | the browser already resolved them under the viewBox + ancestor transforms; redoing the math drifts |
+| Counting subpaths via `M` letter occurrences | yes | structural, not positional |
+
+Plan I uses this split: linear-only `<path>` collapses to ONE pptx shape
+(line / rect via `src/shape-classify.ts`); curved paths keep the previous
+N-segment sampling because pptxgenjs has no `custGeom` API. The classifier
+itself is pure and works only on screen-space `{x, y}` points the browser
+has already produced.
+
+### Deferred: curves as a single shape
+
+Curved `<path>` elements (any `C/S/Q/T/A` command) still emit as N-1
+hairline line shapes — same visual, ugly editability. The right primitive
+is OOXML `<a:custGeom>` written via `pptx-postprocess.ts` (pptxgenjs has
+no API for it). Tracked for a future plan; not Plan I scope.
 
 ## Visual verification: pptx → PNG via Windows PowerPoint (WSL)
 
