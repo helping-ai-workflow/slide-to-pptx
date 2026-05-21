@@ -87,9 +87,15 @@ function renderRichText(
     const isBareNewline = r.text === '\n' || r.text === '\r\n';
     if (isBareNewline) {
       const last = flatRuns[flatRuns.length - 1];
+      // Edge case: a leading bare newline has no preceding run to attach
+      // `breakAfter` to. The DOM extractor does not emit leading newlines
+      // in practice (every block opens with content before any <br/>), but
+      // silently dropping it here matches PowerPoint's own behaviour for
+      // an empty leading paragraph — a leading break is visually inert.
       if (last) last.breakAfter = true;
       // Drop the standalone newline run; the break is captured by the
-      // preceding entry's `breakAfter` flag.
+      // preceding entry's `breakAfter` flag (or dropped entirely when
+      // there is no preceding run).
       continue;
     }
     flatRuns.push({ run: r, breakAfter: false });

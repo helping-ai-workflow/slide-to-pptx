@@ -225,15 +225,26 @@ function processSpTree(spTreeChildren: any[]): any[] {
 // would over-eagerly route their EA glyphs to Microsoft JhengHei. That is
 // a known limitation tracked for a follow-up — for now JhengHei renders
 // JP/SC glyphs reasonably via shared CJK Unified Ideographs.
-const EA_FONT = 'Microsoft JhengHei';
+//
+// TODO(plan-H-future): make EA font configurable per deck (TC / SC / JP).
+// Hardcoded to TC because the current corpus is Traditional Chinese only.
+export const POWERPOINT_TC_FONT = 'Microsoft JhengHei';
 // fast-xml-parser's builder emits self-closing source as expanded
 // `<a:ea typeface="..." pitchFamily="34" charset="-122"></a:ea>` rather
 // than `<a:ea ... />`. Match both forms so the rewrite is robust if the
 // builder changes its default emission style.
-function rewriteEastAsianTypeface(xml: string): string {
+//
+// Attribute-name pattern follows the XML Name production
+// (https://www.w3.org/TR/xml/#NT-Name, simplified ASCII subset). It must
+// accept namespace-prefixed names like `r:embed` or `x:id` — OOXML uses
+// these freely on run-property children. A plain `[a-zA-Z]+` would either
+// fail to match the whole element (skipping the rewrite) or truncate
+// attributes that appear after `typeface` once a colon-bearing one
+// follows.
+export function rewriteEastAsianTypeface(xml: string): string {
   return xml.replace(
-    /<a:ea\s+typeface="[^"]*"((?:\s+[a-zA-Z]+="[^"]*")*)\s*(\/>|><\/a:ea>)/g,
-    `<a:ea typeface="${EA_FONT}"$1$2`,
+    /<a:ea\s+typeface="[^"]*"((?:\s+[a-zA-Z:_][a-zA-Z0-9:_.-]*="[^"]*")*)\s*(\/>|><\/a:ea>)/g,
+    `<a:ea typeface="${POWERPOINT_TC_FONT}"$1$2`,
   );
 }
 

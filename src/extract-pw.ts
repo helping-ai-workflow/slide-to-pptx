@@ -367,6 +367,12 @@ const EXTRACT_SCRIPT = `(() => {
     // Height pad always applies (line-height differences are small and
     // a hair of extra vertical room never causes wrap regression).
     const padRect = (r, fs, content) => {
+      // Range covers CJK Unified Ideographs (U+4E00–U+9FFF), CJK
+      // symbols/punctuation/kana (U+3000–U+303F, U+3040–U+30FF) and
+      // Bopomofo (U+3100–U+312F) via the [　-鿿] block, Hangul
+      // syllables (U+AC00–U+D7A3) via [가-힣], and fullwidth
+      // forms (U+FF00–U+FFEF) via [＀-￯]. In short: any CJK / Hangul /
+      // fullwidth / JP kana character forces the EA-font width-pad path.
       const hasCJK = content && /[　-鿿가-힣＀-￯]/.test(content);
       // CJK text needs NEGATIVE pad: PowerPoint's JhengHei is narrower than
       // Chromium's Noto Sans CJK fallback, so the captured Chromium rect
