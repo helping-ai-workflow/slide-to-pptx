@@ -16,6 +16,23 @@ export type IRGroup = {
   children: IRItem[];
 };
 
+export type IRCurvePath = {
+  kind: 'CurvePath';
+  id: string;
+  // Points in slide-canvas px (0..1920, 0..1080).
+  points: { x: number; y: number }[];
+  closed: boolean;
+  // Bounding rect derived from points; pptx-build uses it for <a:xfrm>.
+  rect: Rect;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  dashed?: boolean;
+  endArrow?: boolean;
+  domLeafId?: string;
+  classification?: LeafClassification;
+};
+
 export type IRShape = {
   kind: 'Shape';
   id: string;
@@ -73,7 +90,7 @@ export type IRDecorBox = {
   classification?: LeafClassification;
 };
 
-export type IRItem = IRGroup | IRShape | IRRichText | IRImage | IRDecorBox;
+export type IRItem = IRGroup | IRShape | IRCurvePath | IRRichText | IRImage | IRDecorBox;
 
 export type IRPage = {
   pageId: string;

@@ -200,8 +200,8 @@ async function main() {
     ? `${safeName(pages[0].pageName)}.pptx`
     : `${safeName(path.basename(opts.slideDir))}.pptx`;
   const pptxPath = path.join(opts.outDir, pptxName);
-  await buildPptx(pages, pptxPath, opts.slideDir, design);
-  await postprocessPptx(pptxPath);
+  const { customGeomsPerSlide } = await buildPptx(pages, pptxPath, opts.slideDir, design);
+  await postprocessPptx(pptxPath, customGeomsPerSlide);
   const summaries: PageClassificationSummary[] = pages.map((p) => ({
     pageIndex: p.pageIndex,
     pageName: p.pageName,
