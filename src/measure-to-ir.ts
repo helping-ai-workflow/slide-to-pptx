@@ -310,6 +310,7 @@ export function measureToIR(m: PageMeasure): IRPage {
         rect: r(p.rect),
         src: p.fallbackImageDataUrl!,
         alt: p.name,
+        srcPrimId: p.id,
       };
       img.domLeafId = p.id;
       img.classification = {
