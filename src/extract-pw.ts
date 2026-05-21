@@ -860,20 +860,67 @@ export async function measureSlide(
 
       // Primitive-level fallback screenshots — one PNG per primitive whose
       // root element has a non-native background (CSS gradient / url image).
-      // omitBackground:true so the gradient composites against transparency;
-      // the PNG includes every child text/decor so measureToIR drops their
-      // separate leaves.
+      // Hide every non-descendant, non-ancestor DOM element before each
+      // screenshot so the PNG contains ONLY the target primitive's own
+      // pixels + its DOM descendants. Without this, Playwright's
+      // locator.screenshot clips to the target's bbox but Chromium has
+      // already composited any sibling element whose paint area overlapped
+      // — those pixels get baked into the PNG and PowerPoint then
+      // double-paints them (Plan H1's bug, first visible on getting-started
+      // where a full-slide gradient bg overlaps every other primitive).
+      // Plan K's K-1 isolation.
+      //
+      // Why we hide all sibling-subtree elements (not just other primitives):
+      // a deck may render visible HTML (<h1>, <p>, ...) directly in the
+      // page body without wrapping each one in a primitive. Those raw
+      // elements would still be baked into the PNG. The "ancestors stay
+      // visible" rule preserves the target's layout context (body padding,
+      // wrapper transforms, etc.) — only sibling subtrees that paint
+      // unrelated pixels get hidden.
+      //
+      // omitBackground:true keeps the slide's body background transparent
+      // but does nothing about sibling content (real opaque DOM elements).
+      // visibility:hidden is preferred over display:none because it does
+      // not collapse the box and therefore does not perturb any other
+      // element's getBoundingClientRect mid-pass.
       for (const pf of primsToFallback) {
         const primId = r.primitives[pf.index].id;
-        const locator = page.locator(`[data-prim-id="${primId.replace(/"/g, '\\"')}"]`);
+        await page.evaluate((id) => {
+          const target = document.querySelector(`[data-prim-id="${id}"]`);
+          if (!target) return;
+          const all = document.body.querySelectorAll('*');
+          const hidden: HTMLElement[] = [];
+          for (const p of Array.from(all)) {
+            if (p === target) continue;
+            if (target.contains(p)) continue; // descendant — keep
+            if (p.contains(target)) continue; // ancestor — keep
+            const el = p as HTMLElement;
+            el.setAttribute('data-prim-orig-vis', el.style.visibility);
+            el.style.visibility = 'hidden';
+            hidden.push(el);
+          }
+          (window as any).__primIsolated = hidden;
+        }, primId);
         try {
-          const buf = await locator.first().screenshot({ omitBackground: true, type: 'png' });
-          (r.primitives[pf.index] as any).fallbackImageDataUrl =
-            `data:image/png;base64,${buf.toString('base64')}`;
-        } catch {
-          // Same fallthrough as leaves: keep the primitive as a normal group
-          // so children still emit natively. Less correct visually but
-          // preserves editability.
+          try {
+            const locator = page.locator(`[data-prim-id="${primId.replace(/"/g, '\\"')}"]`);
+            const buf = await locator.first().screenshot({ omitBackground: true, type: 'png' });
+            (r.primitives[pf.index] as any).fallbackImageDataUrl =
+              `data:image/png;base64,${buf.toString('base64')}`;
+          } catch {
+            // Same fallthrough as leaves: keep the primitive as a normal group
+            // so children still emit natively. Less correct visually but
+            // preserves editability.
+          }
+        } finally {
+          await page.evaluate(() => {
+            const hidden = ((window as any).__primIsolated || []) as HTMLElement[];
+            for (const el of hidden) {
+              el.style.visibility = el.getAttribute('data-prim-orig-vis') || '';
+              el.removeAttribute('data-prim-orig-vis');
+            }
+            delete (window as any).__primIsolated;
+          });
         }
       }
 
