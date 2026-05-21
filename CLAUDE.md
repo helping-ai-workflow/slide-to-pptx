@@ -15,6 +15,32 @@ GitHub Actions auto-publishes to npm on any pushed `v*.*.*` tag
 (`.github/workflows/publish.yml`). The publisher side does not run
 `postinstall`, so the workflow itself is fast (~10s).
 
+### Pre-release visual check
+
+Before bumping the version, run:
+
+```bash
+npm run pre-release
+```
+
+This drives PowerPoint COM to render every corpus deck (4 dev decks at
+`/home/user/hp_workspace/my-slide/slides/` + 4 stress fixtures under
+`tests/fixtures/stress/`) and pixel-diffs each page against the HTML
+snapshot ground truth. Any page above the 5% pixel-diff threshold fails
+the script.
+
+Investigate failures before releasing — silent visual regressions are
+the class of bug this harness exists to catch. Diff PNGs are written to
+`/mnt/c/Users/Joe96/Downloads/pptx-render/vr/<deck>/out/diff-NN.png`
+for visual triage. The JSON summary lives at
+`docs/visual-regression-baseline.json` (gitignored — the harness
+overwrites it each run).
+
+Requires WSL + Microsoft PowerPoint installed at the documented path.
+Not available in non-WSL environments; in that case the harness exits 2
+and the release flow must verify visually some other way (e.g. open the
+pptx manually).
+
 Steps for a release:
 
 1. Land non-release commit(s) on `main` (e.g. `fix: ...`, `feat: ...`).
