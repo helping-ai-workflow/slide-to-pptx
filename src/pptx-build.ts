@@ -316,7 +316,10 @@ export async function buildPptx(
   const customGeomsPerSlide: CustGeomSpec[][] = [];
   for (const page of pages) {
     const slide = pres.addSlide();
-    slide.background = { color: bgHex };
+    // Per-page bg override (captured from a full-bleed wrapper div whose
+    // colour differs from the deck-level palette.bg) takes precedence.
+    const pageBg = page.bgOverride ? (hex(page.bgOverride) || bgHex) : bgHex;
+    slide.background = { color: pageBg };
     const customGeoms: CustGeomSpec[] = [];
     for (const it of page.items) renderItem(slide, it, [], assetRoot, customGeoms);
     customGeomsPerSlide.push(customGeoms);

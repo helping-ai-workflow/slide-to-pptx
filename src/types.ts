@@ -102,6 +102,12 @@ export type IRPage = {
   pageName: string;
   size: { w: 1920; h: 1080 };
   items: IRItem[];    // tree (groups can nest)
+  // When a page wraps content in a full-bleed div with its own background
+  // colour (e.g. dark-theme override of the deck-level palette.bg), that
+  // decor is too large to emit as a shape (it would paint over everything)
+  // but its colour needs to surface somewhere. The wrapper colour gets
+  // captured here so pptx-build can apply it as the slide background.
+  bgOverride?: string;
 };
 
 // Canonical leaf classes recognised by classifier. See spec §6.1.
