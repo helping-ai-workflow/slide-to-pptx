@@ -11,11 +11,22 @@
     "pptxgenjs"
   ],
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "slide-to-pptx": "./bin/slide-to-pptx.cjs"
   },
   "files": [
     "bin/",
+    "dist/",
     "src/",
     "scripts/",
     "tsconfig.json",
@@ -41,11 +52,14 @@
     "@types/react": "^18.3.12",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
+    "tsdown": "^0.9.9",
     "typescript": "^5.6.3"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
     "spike": "tsx src/cli.ts ../my-slide/slides/mac-merge-tx-spec",
+    "build": "tsdown",
+    "prepack": "npm run build",
     "test": "node --import tsx --test $(find tests -name '*.test.ts' -not -name 'corpus.test.ts')",
     "test:corpus": "node --import tsx --test tests/corpus.test.ts",
     "test:all": "node --import tsx --test $(find tests -name '*.test.ts')",
