@@ -63,6 +63,8 @@ const CORPUS = [
   { name: 'object-fit-stress',       path: path.join(STRESS_ROOT, 'object-fit-stress') },
   { name: 'path-commands-stress',    path: path.join(STRESS_ROOT, 'path-commands-stress') },
   { name: 'palette-bg-stress',       path: path.join(PATTERNS_ROOT, 'palette-bg-stress') },
+  { name: 'page-fill-bg-stress',     path: path.join(PATTERNS_ROOT, 'page-fill-bg-stress') },
+  { name: 'blend-mode-stress',       path: path.join(PATTERNS_ROOT, 'blend-mode-stress') },
   { name: 'gradient-bg-stress',      path: path.join(PATTERNS_ROOT, 'gradient-bg-stress') },
   { name: 'cover-hero-stress',       path: path.join(PATTERNS_ROOT, 'cover-hero-stress') },
   { name: 'code-block-stress',       path: path.join(PATTERNS_ROOT, 'code-block-stress') },
