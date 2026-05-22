@@ -114,11 +114,37 @@ Run spec and quality reviewers in parallel when neither needs to write
 code (both are read-only). Send fixes back to the original implementer
 subagent via `SendMessage` so the implementer keeps full context.
 
-### Visual verification is mandatory
+### Two-gate validation (pre-release + post-release)
+
+`npm run pre-release` runs TWO independent pixel-diff gates. Both must be
+green before tagging a release. The gates examine different layers of the
+pipeline and catch different bug classes — a whole-image diff cannot detect
+structural duplication with low pixel footprint (Plan K root cause), so a
+per-primimg diff is added alongside it.
+
+| Aspect | Gate 1 (pre-release) | Gate 2 (post-release) |
+|---|---|---|
+| Comparison target | HTML snapshot (Chromium ground truth) | fresh isolated re-render of source primitive |
+| Comparison input | PowerPoint-exported pptx PNG | embedded fallback PNG inside pptx |
+| Layer | end-to-end | mid-pipeline |
+| Default threshold | 5% per-page | 1% per-primimg |
+| Override file | `docs/visual-regression-thresholds.json` `.overrides` | same file, `.postRelease.overrides` |
+| Catches | whole-slide visual drift | sibling-bake / structural duplication |
+| Misses | low-footprint structural duplicates | end-to-end issues that don't go through a primimg |
+| Runtime cost | ~3-5 min (PowerPoint COM) | ~10 s (Playwright re-render) |
+
+Plan K's spec captures the per-pixel arithmetic that proves Gate 1 alone
+cannot catch the duplicated-text class of bug (3.98% diff on
+`getting-started` Cover with 10 duplicated titles is below the 5%
+threshold — but the title visibly renders twice in PowerPoint).
+
+### Visual verification is a developer-side check, not a gate
 
 `npm test` and `npx tsc --noEmit` verify code correctness, not feature
-correctness. They CANNOT detect a visual regression. Before claiming a
-pptx-affecting fix works:
+correctness. They CANNOT detect a visual regression. The two pixel-diff
+gates above are the automated replacement.
+
+When iterating on a fix during development:
 
 - Read the relevant `diff-NN.png` with the Read tool. The agent is
   multimodal; red pixels in the diff PNG are the only authoritative
@@ -129,17 +155,26 @@ pptx-affecting fix works:
   pptx in PowerPoint. The visual-regression harness exists so the agent
   can catch them first.
 
+Opening the pptx in PowerPoint manually is useful for fast iteration but
+is NOT the gate — the gate is `npm run pre-release` returning exit 0
+with both sections green. Plan K shipped v0.3.2 with both `npm test` AND
+Gate 1 passing, but a duplicated-text bug visible in PowerPoint. Gate 2
+is the quantified replacement for "human eyeball at release time".
+
 ### Test/tsc gates
 
-- `npm test` — current baseline 57/57 (28 after Plan H2, 28 → 44 with
+- `npm test` — current baseline 63/63 (28 after Plan H2, 28 → 44 with
   Plan I's 16 classifier tests in `tests/shape-classify.test.ts`,
   44 → 57 with Plan J's 13 custGeom-builder tests in
-  `tests/custgeom.test.ts`). Implementers update this count when they
-  add tests; reviewers verify the count claim.
+  `tests/custgeom.test.ts`, 57 → 63 with Plan K's 6 helper tests in
+  `tests/post-release-check.test.ts`). Implementers update this count
+  when they add tests; reviewers verify the count claim.
 - `npx tsc --noEmit` — must be clean.
-- `npm run pre-release` — full corpus visual regression, ~3-5 min via
-  PowerPoint COM. Required before tagging a release; recommended after
-  any change touching the IR / extraction / postprocess paths.
+- `npm run pre-release` — runs Gate 1 (per-page) then Gate 2 (per-primimg)
+  in one invocation. ~3-5 min for Gate 1 via PowerPoint COM + ~10 s for
+  Gate 2 via Playwright. Required before tagging a release; recommended
+  after any change touching the IR / extraction / postprocess /
+  primitive-screenshot paths.
 
 ### PR conventions
 
@@ -211,17 +246,19 @@ src/
   shape-classify.ts      # pure point-list → line / rect / polyline classifier
   custgeom.ts            # pure builder for <a:custGeom> OOXML AST node
   measure-to-ir.ts       # measurements → IR tree
-  pptx-build.ts          # IR → pptxgenjs (curves emit as __cust__N__ placeholders)
+  pptx-build.ts          # IR → pptxgenjs (curves emit as __cust__N__ placeholders, primimg shapes get primimg:<srcPrimId>: name prefix)
   pptx-postprocess.ts    # rewrite XML — group p:grpSp, swap __cust__ placeholders to custGeom, CJK font
 bin/slide-to-pptx.cjs    # CLI entrypoint (spawns tsx)
-scripts/postinstall.cjs  # auto-install Chromium after npm install
+scripts/postinstall.cjs        # auto-install Chromium after npm install
+scripts/visual-regression.mjs  # Gate 1 (per-page) + invokes Gate 2 (per-primimg)
+scripts/post-release-check.mjs # Gate 2: parse pptx, re-render isolated primitive, pixel-diff
 .github/workflows/publish.yml  # tag → npm publish
 ```
 
 ## Typecheck
 
 `npx tsc --noEmit` is one of the mechanical gates. Unit tests
-(`npm test`, currently 44 / 44 via `node:test`) are the other. The publish
+(`npm test`, currently 63 / 63 via `node:test`) are the other. The publish
 workflow's `npm test` step is a no-op stub — actual test enforcement
 happens in the dev loop (see "Development workflow" → "Test/tsc gates").
 
