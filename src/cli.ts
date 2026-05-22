@@ -1,14 +1,8 @@
 import './env.js';
-import { writeFile, mkdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderSlideHtml } from './render-html.js';
-import { measureSlide } from './extract-pw.js';
-import { measureToIR } from './measure-to-ir.js';
-import { buildPptx } from './pptx-build.js';
-import { postprocessPptx } from './pptx-postprocess.js';
-import { buildFidelityReport, type PageClassificationSummary } from './fidelity-report.js';
-import type { IRItem, IRPage } from './types.js';
+import type { IRPage } from './types.js';
 
 async function readPackageVersion(): Promise<string> {
   // package.json sits one directory above the built/transpiled cli.js
@@ -127,21 +121,6 @@ function safeName(s: string): string {
   return s.replace(/[^\w.-]+/g, '_').replace(/^\.+/, '_').slice(0, 120) || '_';
 }
 
-function collectClassifications(items: IRItem[]): PageClassificationSummary['classifications'] {
-  const out: PageClassificationSummary['classifications'] = [];
-  for (const it of items) {
-    if (it.kind === 'Group') { out.push(...collectClassifications(it.children)); continue; }
-    if (it.classification) {
-      // Prefer the stable DOM data-leaf-id when available; fall back to the
-      // IR id for sites that don't have one (e.g., SVG segments synthesised
-      // from path parsing).
-      const leafId = ((it as any).domLeafId as string | undefined) ?? it.id;
-      out.push({ leafId, classification: it.classification });
-    }
-  }
-  return out;
-}
-
 async function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('-v') || argv.includes('--version')) {
@@ -157,9 +136,10 @@ async function main() {
 
   const info = opts.quiet ? () => {} : (msg: string) => console.log(msg);
 
-  await mkdir(opts.outDir, { recursive: true });
-
   if (opts.htmlOnly) {
+    const { renderSlideHtml } = await import('./render-html.js');
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    await mkdir(opts.outDir, { recursive: true });
     const { pages: allHtml } = await renderSlideHtml(opts.slideDir);
     for (const p of allHtml) {
       const hp = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${safeName(p.pageName)}.html`);
@@ -169,52 +149,30 @@ async function main() {
     return;
   }
 
-  const { pages: allHtml, design } = await renderSlideHtml(opts.slideDir);
-  const selected = opts.pageFilter
-    ? allHtml.filter((p) => p.pageName === opts.pageFilter)
-    : allHtml;
-  if (selected.length === 0) {
-    console.error(`no page matched filter "${opts.pageFilter}"`);
-    process.exit(1);
-  }
-
-  const deckBase = safeName(path.basename(opts.slideDir));
-  const snapshotDir = opts.snapshots
-    ? path.join(opts.outDir, `${deckBase}.snapshots`)
-    : undefined;
-  const measures = await measureSlide(selected, { snapshotDir });
-  const pages: IRPage[] = measures.map(measureToIR);
+  const { orchestrate } = await import('./orchestrate.js');
+  const result = await orchestrate({
+    slideDir: opts.slideDir,
+    outDir: opts.outDir,
+    pageFilter: opts.pageFilter,
+    snapshots: opts.snapshots,
+    onProgress: (e) => {
+      if (!opts.quiet) info(`phase: ${e.phase}`);
+    },
+  });
 
   if (opts.emitIR || opts.irOnly) {
-    for (const p of pages) {
+    const { writeFile } = await import('node:fs/promises');
+    for (const p of result.pages) {
       const irPath = path.join(opts.outDir, `${p.pageIndex.toString().padStart(2, '0')}-${safeName(p.pageName)}.ir.json`);
       await writeFile(irPath, JSON.stringify(p, null, 2), 'utf8');
     }
-    info(`IR written: ${pages.length} page(s) → ${opts.outDir}`);
+    info(`IR written: ${result.pages.length} page(s) → ${opts.outDir}`);
   }
-  if (!opts.quiet) printCoverage(pages);
-
+  if (!opts.quiet) printCoverage(result.pages);
   if (opts.irOnly) return;
 
-  const pptxName = opts.pageFilter
-    ? `${safeName(pages[0].pageName)}.pptx`
-    : `${safeName(path.basename(opts.slideDir))}.pptx`;
-  const pptxPath = path.join(opts.outDir, pptxName);
-  const { customGeomsPerSlide } = await buildPptx(pages, pptxPath, opts.slideDir, design);
-  await postprocessPptx(pptxPath, customGeomsPerSlide);
-  const summaries: PageClassificationSummary[] = pages.map((p) => ({
-    pageIndex: p.pageIndex,
-    pageName: p.pageName,
-    classifications: collectClassifications(p.items),
-  }));
-  const report = buildFidelityReport({
-    deck: path.basename(opts.slideDir),
-    pages: summaries,
-  });
-  const reportPath = path.join(opts.outDir, `${safeName(path.basename(opts.slideDir))}.fidelity.json`);
-  await writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8');
-  info(`FIDELITY written: ${reportPath}`);
-  info(`PPTX written: ${pptxPath}`);
+  info(`FIDELITY written: ${result.fidelityPath}`);
+  info(`PPTX written: ${result.pptxPath}`);
 }
 
 function printCoverage(pages: IRPage[]) {
