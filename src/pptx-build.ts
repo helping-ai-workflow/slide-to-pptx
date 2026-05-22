@@ -242,7 +242,14 @@ function renderImage(
   const x = px(it.rect.x), y = py(it.rect.y);
   const w = Math.max(px(it.rect.w), 0.05);
   const h = Math.max(py(it.rect.h), 0.05);
-  const objectName = nameFor(groupChain, it.id);
+  const baseName = nameFor(groupChain, it.id);
+  // Plan K K-2: encode srcPrimId on synthetic primitive-screenshot images so
+  // the post-release pixel-diff gate can identify and re-render the source
+  // primitive purely by reading the emitted pptx. Plain images keep their
+  // unprefixed name.
+  const objectName = it.srcPrimId
+    ? `primimg:${it.srcPrimId}:${baseName}`
+    : baseName;
   if (it.src.startsWith('data:')) {
     slide.addImage({ data: it.src, x, y, w, h, sizing: { type: 'contain', w, h }, objectName } as any);
     return;

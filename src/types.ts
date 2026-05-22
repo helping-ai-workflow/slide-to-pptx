@@ -74,6 +74,10 @@ export type IRImage = {
   domLeafId?: string;
   fallbackImageDataUrl?: string;
   classification?: LeafClassification;
+  // Set on synthetic Images born from Plan H1's primitive-screenshot fallback.
+  // Plan K's post-release gate uses this to re-render the same primitive
+  // in isolation and pixel-diff against the embedded PNG.
+  srcPrimId?: string;
 };
 
 export type IRDecorBox = {
