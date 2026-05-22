@@ -78,6 +78,49 @@
         "category": "text-inset-drift",
         "reason": "Plan K: K-1 stopped baking Chromium-positioned text into the GridBg primimg, so the pptxgenjs ~14 px <a:bodyPr> text inset now shows up in the whole-image diff. The visual output is correct (each text appears exactly once); the drift is a pptxgenjs default-inset issue tracked separately. The post-release gate enforces primimg integrity."
       }
+    },
+    "blend-mode-stress": {
+      "1": {
+        "max": 0.95,
+        "category": "mix-blend-mode-not-implemented",
+        "reason": "Full-bleed <feTurbulence> noise rect with mix-blend-mode: multiply is captured as a 1920x1080 PNG and stamped onto the pptx slide without honouring blend-mode. PowerPoint renders the noise as a solid dark layer over the cream bg, turning the whole page near-black. Same root cause as claude-code-intro / open-slide-launch in real-world decks. Future fix: detect mix-blend-mode on captured overlays and either skip the overlay or apply <a:blip><a:duotone> equivalent."
+      }
+    },
+    "gradient-bg-stress": {
+      "1": {
+        "max": 0.30,
+        "category": "gradient-not-implemented",
+        "reason": "CSS linear-gradient on a plain div is not yet translated into a pptx gradient fill — the gradient block silently drops out of the export. Tracked as a follow-up; the fixture exists so the diff stays visible and a future fix can lower the threshold."
+      },
+      "2": {
+        "max": 0.30,
+        "category": "gradient-not-implemented",
+        "reason": "Radial-gradient backgrounds drop out of the pptx export (same root cause as slide 1). Future fix should map CSS gradients to <a:gradFill> or rasterise the block as primimg."
+      },
+      "3": {
+        "max": 0.07,
+        "category": "box-shadow-rasterisation",
+        "reason": "Drop-shadow/glow blocks rasterise correctly but anti-aliased halos diff by ~6-7% vs the HTML render. The primimg post-release gate verifies the rasterisation pixel-for-pixel against an isolated re-render."
+      }
+    },
+    "cover-hero-stress": {
+      "1": {
+        "max": 0.07,
+        "category": "font-substitution",
+        "reason": "Iowan Old Style serif at 280 px substitutes to PowerPoint's default serif metric; glyph-edge AA differs. Closure: <p:embeddedFontLst> font embedding (post-v0.4)."
+      },
+      "3": {
+        "max": 0.10,
+        "category": "font-substitution",
+        "reason": "Long-title 160 px wraps differently when the serif substitutes; line-break position shifts a few pixels. Same closure as slide 1."
+      }
+    },
+    "transform-stress": {
+      "1": {
+        "max": 0.10,
+        "category": "aa-noise",
+        "reason": "Rotated cards expose anti-aliasing on each diagonal edge. The shapes themselves position + rotate correctly; the diff is sub-pixel halo, identical class to svg-viewbox-stress slide 4."
+      }
     }
   },
   "postRelease": {

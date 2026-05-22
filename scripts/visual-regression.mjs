@@ -51,15 +51,26 @@ function overrideFor(deckName, slideIdx, config) {
   return config.overrides?.[deckName]?.[String(slideIdx)] ?? null;
 }
 
+const PATTERNS_ROOT = path.join(REPO_ROOT, 'tests/fixtures/patterns');
+const STRESS_ROOT = path.join(REPO_ROOT, 'tests/fixtures/stress');
 const CORPUS = [
   { name: 'mac-merge-tx-spec',       path: '/home/user/hp_workspace/my-slide/slides/mac-merge-tx-spec' },
   { name: 'how-i-use-claude-code',   path: '/home/user/hp_workspace/my-slide/slides/how-i-use-claude-code' },
   { name: 'getting-started',         path: '/home/user/hp_workspace/my-slide/slides/getting-started' },
   { name: 'aibf-test-en',            path: '/home/user/hp_workspace/my-slide/slides/aibf-test-en' },
-  { name: 'filter-stress',           path: path.join(REPO_ROOT, 'tests/fixtures/stress/filter-stress') },
-  { name: 'svg-viewbox-stress',      path: path.join(REPO_ROOT, 'tests/fixtures/stress/svg-viewbox-stress') },
-  { name: 'object-fit-stress',       path: path.join(REPO_ROOT, 'tests/fixtures/stress/object-fit-stress') },
-  { name: 'path-commands-stress',    path: path.join(REPO_ROOT, 'tests/fixtures/stress/path-commands-stress') },
+  { name: 'filter-stress',           path: path.join(STRESS_ROOT, 'filter-stress') },
+  { name: 'svg-viewbox-stress',      path: path.join(STRESS_ROOT, 'svg-viewbox-stress') },
+  { name: 'object-fit-stress',       path: path.join(STRESS_ROOT, 'object-fit-stress') },
+  { name: 'path-commands-stress',    path: path.join(STRESS_ROOT, 'path-commands-stress') },
+  { name: 'palette-bg-stress',       path: path.join(PATTERNS_ROOT, 'palette-bg-stress') },
+  { name: 'page-fill-bg-stress',     path: path.join(PATTERNS_ROOT, 'page-fill-bg-stress') },
+  { name: 'blend-mode-stress',       path: path.join(PATTERNS_ROOT, 'blend-mode-stress') },
+  { name: 'gradient-bg-stress',      path: path.join(PATTERNS_ROOT, 'gradient-bg-stress') },
+  { name: 'cover-hero-stress',       path: path.join(PATTERNS_ROOT, 'cover-hero-stress') },
+  { name: 'code-block-stress',       path: path.join(PATTERNS_ROOT, 'code-block-stress') },
+  { name: 'transform-stress',        path: path.join(PATTERNS_ROOT, 'transform-stress') },
+  { name: 'font-family-stress',      path: path.join(PATTERNS_ROOT, 'font-family-stress') },
+  { name: 'page-number-stress',      path: path.join(PATTERNS_ROOT, 'page-number-stress') },
 ];
 
 const WIN_STAGING_LINUX = '/mnt/c/Users/Joe96/Downloads/pptx-render/vr';
