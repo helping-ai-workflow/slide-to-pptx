@@ -729,6 +729,9 @@ export type MeasureOptions = {
   // When set, the function writes a 1920×1080 PNG per page next to the
   // pptx output. Reuses the Playwright page already loaded for measurement.
   snapshotDir?: string;
+  // Per-page progress hook. Called after each page finishes measuring +
+  // (optional) snapshot. `current` is 1-indexed; `total` is the page count.
+  onPage?: (current: number, total: number) => void;
 };
 
 export async function measureSlide(
@@ -958,6 +961,7 @@ export async function measureSlide(
         const outPath = path.join(opts.snapshotDir, `${idx}-${safe}.png`);
         await page.screenshot({ path: outPath, fullPage: false, clip: { x: 0, y: 0, width: 1920, height: 1080 } });
       }
+      opts.onPage?.(out.length, pages.length);
     }
   } finally {
     await browser.close();

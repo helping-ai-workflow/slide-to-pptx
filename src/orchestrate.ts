@@ -19,6 +19,7 @@ export type OrchestrateOpts = {
 export type ProgressEvent =
   | { phase: 'loading'; current: 0; total: 1 }
   | { phase: 'measuring'; current: 0; total: 1 }
+  | { phase: 'rendering'; current: number; total: number }
   | { phase: 'building'; current: 0; total: 1 }
   | { phase: 'postprocessing'; current: 0; total: 1 }
   | { phase: 'done'; current: 1; total: 1 };
@@ -67,7 +68,12 @@ export async function orchestrate(opts: OrchestrateOpts): Promise<OrchestrateRes
   const snapshotDir = snapshots ? path.join(outDir, `${deckBase}.snapshots`) : undefined;
 
   onProgress({ phase: 'measuring', current: 0, total: 1 });
-  const measures = await measureSlide(selected, { snapshotDir });
+  const measures = await measureSlide(selected, {
+    snapshotDir,
+    onPage: (current, total) => {
+      onProgress({ phase: 'rendering', current, total });
+    },
+  });
   const pages: IRPage[] = measures.map(measureToIR);
 
   onProgress({ phase: 'building', current: 0, total: 1 });
