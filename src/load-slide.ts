@@ -21,6 +21,29 @@ const pngStubPlugin: Plugin = {
   },
 };
 
+// Stub for @open-slide/core when bundling user decks. The real package
+// pulls in Vite, react-router, and dev-only UI; we only need its public
+// runtime surface to type-check and not throw at static-render time.
+//
+// `useSlidePageNumber` reads from a globalThis slot populated by render-html.ts
+// before each page renders, so per-page footers ("page X of Y") show correct
+// values in the exported pptx instead of a static placeholder.
+const OPEN_SLIDE_STUB_SOURCE = `
+const __os_g = globalThis;
+export function useSlidePageNumber() {
+  return {
+    current: (__os_g.__os_pptx_page_index ?? 0) + 1,
+    total: __os_g.__os_pptx_page_total ?? 1,
+  };
+}
+export function ImagePlaceholder() { return null; }
+export function cssVarsToString() { return ''; }
+export function designToCssVars() { return {}; }
+export const defaultDesign = {};
+export const CANVAS_WIDTH = 1920;
+export const CANVAS_HEIGHT = 1080;
+`;
+
 const openSlideStubPlugin: Plugin = {
   name: 'open-slide-stub',
   setup(b) {
@@ -29,7 +52,7 @@ const openSlideStubPlugin: Plugin = {
       namespace: 'os-stub',
     }));
     b.onLoad({ filter: /.*/, namespace: 'os-stub' }, () => ({
-      contents: `export {};`,
+      contents: OPEN_SLIDE_STUB_SOURCE,
       loader: 'js',
     }));
   },
