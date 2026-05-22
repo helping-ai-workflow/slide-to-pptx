@@ -102,21 +102,33 @@ export async function renderSlideHtml(slideDir: string): Promise<SlideRender> {
 
   const assetMap = new Map<string, string>();
   const out: PageHtml[] = [];
-  for (let i = 0; i < pages.length; i++) {
-    const PageFn = pages[i] as any;
-    const pageName = PageFn?.displayName || PageFn?.name || `page-${i}`;
-    let body = '';
-    let primitives: PrimRecord[] = [];
-    try {
-      const raw = React.createElement(PageFn);
-      const { tree, primitives: prims } = instrumentTree(raw, `pg${i}`, { skipRoot: true });
-      primitives = prims;
-      body = ReactDOMServer.renderToStaticMarkup(tree as any);
-    } catch (e: any) {
-      body = `<div style="color:red;padding:40px">extract error: ${escAttr(String(e?.message ?? e))}</div>`;
+  // Communicate page index/total to the stubbed `useSlidePageNumber` hook
+  // bundled into the user's deck. See `OPEN_SLIDE_STUB_SOURCE` in load-slide.ts.
+  const g = globalThis as { __os_pptx_page_index?: number; __os_pptx_page_total?: number };
+  const prevIndex = g.__os_pptx_page_index;
+  const prevTotal = g.__os_pptx_page_total;
+  try {
+    g.__os_pptx_page_total = pages.length;
+    for (let i = 0; i < pages.length; i++) {
+      g.__os_pptx_page_index = i;
+      const PageFn = pages[i] as any;
+      const pageName = PageFn?.displayName || PageFn?.name || `page-${i}`;
+      let body = '';
+      let primitives: PrimRecord[] = [];
+      try {
+        const raw = React.createElement(PageFn);
+        const { tree, primitives: prims } = instrumentTree(raw, `pg${i}`, { skipRoot: true });
+        primitives = prims;
+        body = ReactDOMServer.renderToStaticMarkup(tree as any);
+      } catch (e: any) {
+        body = `<div style="color:red;padding:40px">extract error: ${escAttr(String(e?.message ?? e))}</div>`;
+      }
+      body = await rewriteAssetUrls(body, slideDir, assetMap);
+      out.push({ pageIndex: i, pageName, html: htmlShell(body, designCss), primitives });
     }
-    body = await rewriteAssetUrls(body, slideDir, assetMap);
-    out.push({ pageIndex: i, pageName, html: htmlShell(body, designCss), primitives });
+  } finally {
+    g.__os_pptx_page_index = prevIndex;
+    g.__os_pptx_page_total = prevTotal;
   }
   return { pages: out, design };
 }
