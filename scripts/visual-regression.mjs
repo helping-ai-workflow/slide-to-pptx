@@ -71,6 +71,7 @@ const CORPUS = [
   { name: 'transform-stress',        path: path.join(PATTERNS_ROOT, 'transform-stress') },
   { name: 'font-family-stress',      path: path.join(PATTERNS_ROOT, 'font-family-stress') },
   { name: 'page-number-stress',      path: path.join(PATTERNS_ROOT, 'page-number-stress') },
+  { name: 'canvas-overflow-stress',  path: path.join(PATTERNS_ROOT, 'canvas-overflow-stress') },
 ];
 
 const WIN_STAGING_LINUX = '/mnt/c/Users/Joe96/Downloads/pptx-render/vr';

@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { PageHtml } from './render-html.js';
 import type { PrimRecord } from './instrument.js';
+import { intersectSlide, overflowsCanvas, TRANSPARENT_PNG_1X1 } from './clip-to-slide.js';
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
@@ -831,6 +832,14 @@ export async function measureSlide(
       r.primitives.forEach((p: any, i: number) => {
         if (p.needsFallback) primsToFallback.push({ primId: p.id, index: i });
       });
+      // A leaf qualifies for fallback when EITHER the classifier promotes
+      // it (unsupported CSS feature, SVG pattern/mask, etc.) OR its
+      // bounding rect extends past the slide canvas — the latter must
+      // raster the visible portion because clipping a native shape's
+      // rect would re-flow text and chop roundRect corners flat, while
+      // the screenshot captures the intended visual exactly. Both paths
+      // converge in the leaf-fallback loop below which clips both the
+      // PNG and the emitted IR rect to the canvas intersection.
       r.texts.forEach((t, i) => {
         const c = classifyLeaf({
           type: 'text',
@@ -841,7 +850,9 @@ export async function measureSlide(
           fontFamily: t.fontFamily,
           cssFeatureFlags: t.cssFeatureFlags,
         });
-        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'text', leafId: t.leafId, index: i });
+        if (c.kind === 'ImageFallback' || overflowsCanvas(t.rect)) {
+          leavesToFallback.push({ kind: 'text', leafId: t.leafId, index: i });
+        }
       });
       r.decors.forEach((d, i) => {
         const c = classifyLeaf({
@@ -852,7 +863,9 @@ export async function measureSlide(
           borderWidth: d.borderWidth,
           cssFeatureFlags: d.cssFeatureFlags,
         });
-        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'decor', leafId: d.leafId, index: i });
+        if (c.kind === 'ImageFallback' || overflowsCanvas(d.rect)) {
+          leavesToFallback.push({ kind: 'decor', leafId: d.leafId, index: i });
+        }
       });
       r.svgShapes.forEach((s, i) => {
         const c = classifyLeaf({
@@ -863,31 +876,105 @@ export async function measureSlide(
           hasPattern: s.hasPattern,
           hasMask: s.hasMask,
         });
-        if (c.kind === 'ImageFallback') leavesToFallback.push({ kind: 'svg', leafId: s.leafId, index: i });
+        if (c.kind === 'ImageFallback' || overflowsCanvas(s.rect)) {
+          leavesToFallback.push({ kind: 'svg', leafId: s.leafId, index: i });
+        }
       });
 
       // De-dupe by leafId so when an SVG produces multiple shapes we only
       // screenshot the host element once and attach the PNG to all of them.
-      const seenLeafIds = new Map<string, string>();
+      // For each leaf-to-fallback we MUST:
+      //   1. Compute the leaf element's current bounding rect via DOM (the
+      //      authoritative paint bbox post-animation-freeze).
+      //   2. Intersect with the slide canvas — like the primitive-level
+      //      fallback path, an element whose rect extends past
+      //      [0,0,1920,1080] must be clipped so the emitted pptx shape
+      //      stays inside the slide bounds.
+      //   3. Hide every sibling subtree (non-ancestor, non-descendant)
+      //      BEFORE the screenshot — without this, a full-bleed SVG/decor
+      //      (e.g. a <svg width="100%" height="100%"> background-grid)
+      //      will bake every overlapping text element into its PNG. The
+      //      same Plan K K-1 isolation that fixed primimg double-painting
+      //      applies to leaf-level fallbacks: the screenshot must capture
+      //      ONLY the target element's own pixels + its DOM descendants.
+      //   4. Take the screenshot with page.screenshot({clip}) using the
+      //      clipped rect (locator.screenshot does not accept absolute
+      //      viewport clip coords, so we go through the page API).
+      //   5. Restore sibling visibility before moving to the next leaf.
+      const seenLeafResults = new Map<string, { rect: Rect; url: string }>();
       for (const f of leavesToFallback) {
-        if (seenLeafIds.has(f.leafId)) continue;
-        const locator = page.locator(`[data-leaf-id="${f.leafId.replace(/"/g, '\\"')}"]`);
+        if (seenLeafResults.has(f.leafId)) continue;
+        const leafBbox = (await page.evaluate((id) => {
+          const sel = `[data-leaf-id="${id.replace(/"/g, '\\"')}"]`;
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const rr = (el as Element).getBoundingClientRect();
+          return { x: rr.left, y: rr.top, w: rr.width, h: rr.height };
+        }, f.leafId)) as Rect | null;
+        if (!leafBbox) continue;
+        const clipped = intersectSlide(leafBbox);
+        if (clipped.w <= 0 || clipped.h <= 0) continue;
+        await page.evaluate((id) => {
+          const sel = `[data-leaf-id="${id.replace(/"/g, '\\"')}"]`;
+          const target = document.querySelector(sel);
+          if (!target) return;
+          const all = document.body.querySelectorAll('*');
+          const hidden: HTMLElement[] = [];
+          for (const p of Array.from(all)) {
+            if (p === target) continue;
+            if (target.contains(p)) continue; // descendant — keep
+            if (p.contains(target)) continue; // ancestor — keep
+            const el = p as HTMLElement;
+            el.setAttribute('data-leaf-orig-vis', el.style.visibility);
+            el.style.visibility = 'hidden';
+            hidden.push(el);
+          }
+          (window as any).__leafIsolated = hidden;
+        }, f.leafId);
         try {
-          const buf = await locator.first().screenshot({ omitBackground: true, type: 'png' });
-          seenLeafIds.set(f.leafId, `data:image/png;base64,${buf.toString('base64')}`);
-        } catch {
-          // Element not located (rare — usually means it was tagged but is
-          // off-screen or hidden). Skip; the leaf will keep its classification
-          // but no fallback image, and pptx-build will fall through to the
-          // native emission path (Plan A behaviour).
+          try {
+            const buf = await page.screenshot({
+              omitBackground: true,
+              type: 'png',
+              clip: { x: clipped.x, y: clipped.y, width: clipped.w, height: clipped.h },
+            });
+            seenLeafResults.set(f.leafId, {
+              rect: clipped,
+              url: `data:image/png;base64,${buf.toString('base64')}`,
+            });
+          } catch {
+            // Element not located / screenshot failed. Skip; the leaf will
+            // keep its classification but no fallback image, and pptx-build
+            // will fall through to the native emission path.
+          }
+        } finally {
+          await page.evaluate(() => {
+            const hidden = ((window as any).__leafIsolated || []) as HTMLElement[];
+            for (const el of hidden) {
+              el.style.visibility = el.getAttribute('data-leaf-orig-vis') || '';
+              el.removeAttribute('data-leaf-orig-vis');
+            }
+            delete (window as any).__leafIsolated;
+          });
         }
       }
+      // Attach the captured PNG + clipped leaf-bbox to every leaf entry
+      // sharing that leafId. Updating the rect (not just the URL) is what
+      // keeps the pptx-build emit rect in sync with the PNG content — a
+      // 1920×1080 PNG at a 600×400 rect would otherwise stretch.
       for (const f of leavesToFallback) {
-        const url = seenLeafIds.get(f.leafId);
-        if (!url) continue;
-        if (f.kind === 'text') r.texts[f.index].fallbackImageDataUrl = url;
-        else if (f.kind === 'decor') r.decors[f.index].fallbackImageDataUrl = url;
-        else if (f.kind === 'svg') r.svgShapes[f.index].fallbackImageDataUrl = url;
+        const result = seenLeafResults.get(f.leafId);
+        if (!result) continue;
+        if (f.kind === 'text') {
+          r.texts[f.index].fallbackImageDataUrl = result.url;
+          r.texts[f.index].rect = result.rect;
+        } else if (f.kind === 'decor') {
+          r.decors[f.index].fallbackImageDataUrl = result.url;
+          r.decors[f.index].rect = result.rect;
+        } else if (f.kind === 'svg') {
+          r.svgShapes[f.index].fallbackImageDataUrl = result.url;
+          r.svgShapes[f.index].rect = result.rect;
+        }
       }
 
       // Primitive-level fallback screenshots — one PNG per primitive whose
@@ -916,7 +1003,29 @@ export async function measureSlide(
       // not collapse the box and therefore does not perturb any other
       // element's getBoundingClientRect mid-pass.
       for (const pf of primsToFallback) {
-        const primId = r.primitives[pf.index].id;
+        const primEntry: any = r.primitives[pf.index];
+        const primId = primEntry.id;
+        // Clip the primitive's bounding rect to the slide canvas
+        // [0,0,1920,1080] before screenshotting. Decks commonly place
+        // decorative gradient orbs / full-bleed backgrounds well past
+        // the canvas edge, relying on the canvas's overflow:hidden to
+        // clip them visually. pptx has no ancestor-clip equivalent, so
+        // an un-clipped primimg would spill into the presenter view.
+        // Clipping here both crops the captured PNG to the visible
+        // region and aligns the IR rect with what the browser actually
+        // paints inside the canvas.
+        const clipped = intersectSlide(primEntry.rect);
+        if (clipped.w <= 0 || clipped.h <= 0) {
+          // Wholly off-canvas: nothing to capture. Emit a 1×1
+          // transparent PNG at the clipped edge so the primitive still
+          // enters measureToIR's fallbackPrimIds set (descendant leaves
+          // then get cascade-suppressed). w/h are forced to ≥1 because
+          // pptx emit paths assume non-degenerate dimensions.
+          primEntry.rect = { x: clipped.x, y: clipped.y, w: 1, h: 1 };
+          primEntry.fallbackImageDataUrl = TRANSPARENT_PNG_1X1;
+          continue;
+        }
+        primEntry.rect = clipped;
         await page.evaluate((id) => {
           const target = document.querySelector(`[data-prim-id="${id}"]`);
           if (!target) return;
@@ -935,9 +1044,16 @@ export async function measureSlide(
         }, primId);
         try {
           try {
-            const locator = page.locator(`[data-prim-id="${primId.replace(/"/g, '\\"')}"]`);
-            const buf = await locator.first().screenshot({ omitBackground: true, type: 'png' });
-            (r.primitives[pf.index] as any).fallbackImageDataUrl =
+            // page.screenshot with explicit clip captures only the
+            // canvas-visible portion of the primitive. The hide-siblings
+            // isolation above ensures no other element paints inside
+            // that clip rect.
+            const buf = await page.screenshot({
+              omitBackground: true,
+              type: 'png',
+              clip: { x: clipped.x, y: clipped.y, width: clipped.w, height: clipped.h },
+            });
+            primEntry.fallbackImageDataUrl =
               `data:image/png;base64,${buf.toString('base64')}`;
           } catch {
             // Same fallthrough as leaves: keep the primitive as a normal group

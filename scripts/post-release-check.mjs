@@ -21,6 +21,7 @@ import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 import { chromium } from 'playwright';
 import { renderSlideHtml } from '../src/render-html.ts';
+import { intersectSlide } from '../src/clip-to-slide.ts';
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -197,9 +198,35 @@ async function renderPrimitiveIsolated(page, srcPrimId) {
     window.__primIsolated = hidden;
   }, srcPrimId);
   try {
+    // Mirror the canvas-clip applied by extract-pw's primitive-screenshot
+    // loop. The embedded PNG was clipped to [0,0,1920,1080] before
+    // emission; re-rendering at the full element bbox would produce a
+    // size mismatch on any primitive that intentionally extends past
+    // the slide edges (gradient orbs, full-bleed bg images).
     const escapedId = srcPrimId.replace(/"/g, '\\"');
-    const locator = page.locator(`[data-prim-id="${escapedId}"]`);
-    return await locator.first().screenshot({ omitBackground: true, type: 'png' });
+    const bbox = await page.evaluate((id) => {
+      const el = document.querySelector(`[data-prim-id="${id}"]`);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
+    }, srcPrimId);
+    if (!bbox) {
+      // Fall back to the locator path so error messages stay informative.
+      const locator = page.locator(`[data-prim-id="${escapedId}"]`);
+      return await locator.first().screenshot({ omitBackground: true, type: 'png' });
+    }
+    const clipped = intersectSlide(bbox);
+    if (clipped.w <= 0 || clipped.h <= 0) {
+      // Wholly off-canvas — extract-pw emits a 1×1 transparent sentinel.
+      // Return a matching buffer so the diff stays zero.
+      const png = new PNG({ width: 1, height: 1 });
+      return PNG.sync.write(png);
+    }
+    return await page.screenshot({
+      omitBackground: true,
+      type: 'png',
+      clip: { x: clipped.x, y: clipped.y, width: clipped.w, height: clipped.h },
+    });
   } finally {
     await page.evaluate(() => {
       const hidden = window.__primIsolated || [];
