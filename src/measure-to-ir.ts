@@ -175,6 +175,28 @@ function textLeafToRich(t: TextLeaf, id: string): IRRichText {
         mono: r.mono,
       }))
     : [{ text: t.text, color: t.color || '#1a1f2e', bold: t.fontWeight >= 600 }];
+  let classification = classifyLeaf({
+    type: 'text',
+    text: t.text,
+    rect: t.rect,
+    color: t.color,
+    fontSize: t.fontSize,
+    fontFamily: t.fontFamily,
+    cssFeatureFlags: t.cssFeatureFlags,
+  });
+  // extract-pw attaches a fallback PNG when the leaf's bbox extends
+  // past the slide canvas — the classifier itself has no canvas-size
+  // knowledge, so upgrade the classification here so pptx-build's
+  // ImageFallback dispatch path takes over. Otherwise the native text
+  // emit would land at the clipped rect and re-flow the glyphs (a
+  // partially-off-slide "01" hero digit would become a smaller centred
+  // "01" instead of preserving the HTML's left-cut profile).
+  if (t.fallbackImageDataUrl && classification.kind !== 'ImageFallback') {
+    classification = {
+      kind: 'ImageFallback',
+      reasons: [...classification.reasons, 'fallback-image-attached'],
+    };
+  }
   return {
     kind: 'RichText',
     id,
@@ -186,15 +208,7 @@ function textLeafToRich(t: TextLeaf, id: string): IRRichText {
       ? (t.textAlign as any) : 'left',
     valign: 'top',
     domLeafId: t.leafId,
-    classification: classifyLeaf({
-      type: 'text',
-      text: t.text,
-      rect: t.rect,
-      color: t.color,
-      fontSize: t.fontSize,
-      fontFamily: t.fontFamily,
-      cssFeatureFlags: t.cssFeatureFlags,
-    }),
+    classification,
     fallbackImageDataUrl: t.fallbackImageDataUrl,
   };
 }
@@ -299,7 +313,19 @@ export function measureToIR(m: PageMeasure): IRPage {
       borderWidth: d.borderWidth,
       cssFeatureFlags: d.cssFeatureFlags,
     });
-    if (d.fallbackImageDataUrl) decor.fallbackImageDataUrl = d.fallbackImageDataUrl;
+    if (d.fallbackImageDataUrl) {
+      decor.fallbackImageDataUrl = d.fallbackImageDataUrl;
+      // extract-pw can attach a fallback PNG for reasons the classifier
+      // doesn't know about — currently slide-canvas overflow promotion.
+      // pptx-build dispatches based on classification.kind, so we must
+      // upgrade the classification or the decor will emit as a native
+      // shape at the clipped rect (which would render as a smaller
+      // full shape instead of a HTML-faithful clipped one).
+      decor.classification = {
+        kind: 'ImageFallback',
+        reasons: [...(decor.classification?.reasons ?? []), 'fallback-image-attached'],
+      };
+    }
     push(d.groupId, decor);
   }
 
@@ -389,20 +415,31 @@ export function measureToIR(m: PageMeasure): IRPage {
       const maxX = Math.max(...group.map((g) => g.rect.x + g.rect.w));
       const maxY = Math.max(...group.map((g) => g.rect.y + g.rect.h));
       const unionRect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      let svgClass = classifyLeaf({
+        type: 'svg',
+        rect: unionRect,
+        hasUnsupportedPath: s.hasUnsupportedPath,
+        hasUse: s.hasUse,
+        hasPattern: s.hasPattern,
+        hasMask: s.hasMask,
+      });
+      // Mirror the text/decor upgrade: extract-pw promotes overflowing
+      // SVG leaves to fallback regardless of classifier verdict, so a
+      // simple icon that happens to bleed off-canvas still gets the
+      // raster path through pptx-build.
+      if (svgClass.kind !== 'ImageFallback') {
+        svgClass = {
+          kind: 'ImageFallback',
+          reasons: [...svgClass.reasons, 'fallback-image-attached'],
+        };
+      }
       const fallback: IRShape = {
         kind: 'Shape',
         id: `svg-${svgN++}`,
         shape: 'rect',
         rect: unionRect,
         domLeafId: s.leafId,
-        classification: classifyLeaf({
-          type: 'svg',
-          rect: unionRect,
-          hasUnsupportedPath: s.hasUnsupportedPath,
-          hasUse: s.hasUse,
-          hasPattern: s.hasPattern,
-          hasMask: s.hasMask,
-        }),
+        classification: svgClass,
         fallbackImageDataUrl: s.fallbackImageDataUrl,
       };
       push(s.groupId, fallback);

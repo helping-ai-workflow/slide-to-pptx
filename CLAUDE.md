@@ -163,11 +163,13 @@ is the quantified replacement for "human eyeball at release time".
 
 ### Test/tsc gates
 
-- `npm test` — current baseline 63/63 (28 after Plan H2, 28 → 44 with
+- `npm test` — current baseline 85/85 (28 after Plan H2, 28 → 44 with
   Plan I's 16 classifier tests in `tests/shape-classify.test.ts`,
   44 → 57 with Plan J's 13 custGeom-builder tests in
   `tests/custgeom.test.ts`, 57 → 63 with Plan K's 6 helper tests in
-  `tests/post-release-check.test.ts`). Implementers update this count
+  `tests/post-release-check.test.ts`, 63 → 85 with the canvas-overflow
+  fix's 19 `tests/clip-to-slide.test.ts` cases + 3 misc test additions
+  picked up in subsequent merges). Implementers update this count
   when they add tests; reviewers verify the count claim.
 - `npx tsc --noEmit` — must be clean.
 - `npm run pre-release` — runs Gate 1 (per-page) then Gate 2 (per-primimg)
@@ -242,8 +244,9 @@ src/
   load-slide.ts          # esbuild bundle index.tsx (stub @open-slide/core)
   instrument.tsx         # tag primitive roots with data-prim-id
   render-html.ts         # renderToStaticMarkup → standalone HTML per page
-  extract-pw.ts          # headless Chromium measure (rect, text, SVG, decor)
+  extract-pw.ts          # headless Chromium measure (rect, text, SVG, decor) + leaf/primitive screenshot fallback (Plan K K-1 isolation + canvas-clip)
   shape-classify.ts      # pure point-list → line / rect / polyline classifier
+  clip-to-slide.ts       # pure intersectSlide + overflowsCanvas helpers (slide-canvas-1920×1080 clipping for primimg + native-overflow promotion)
   custgeom.ts            # pure builder for <a:custGeom> OOXML AST node
   measure-to-ir.ts       # measurements → IR tree
   pptx-build.ts          # IR → pptxgenjs (curves emit as __cust__N__ placeholders, primimg shapes get primimg:<srcPrimId>: name prefix)
