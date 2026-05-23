@@ -37,6 +37,11 @@ export type DecorClassifierInput = {
   type: 'decor';
   rect: Rect;
   background?: string;
+  // Non-empty when the element's computed background-image is a gradient
+  // (linear/radial/conic) or a url() reference. pptx has no native gradient
+  // fill on the decor path, so the classifier promotes to ImageFallback so
+  // extract-pw can capture the element as a PNG.
+  backgroundImage?: string;
   borderWidth: number;
   cssFeatureFlags?: CssFeatureFlags;
 };
@@ -126,6 +131,12 @@ export function classifyLeaf(input: ClassifierInput): LeafClassification {
       const cssReasons = unsupportedCssReasons(input.cssFeatureFlags);
       if (cssReasons.length > 0) {
         return { kind: 'ImageFallback', reasons: cssReasons };
+      }
+      if (input.backgroundImage) {
+        return {
+          kind: 'ImageFallback',
+          reasons: [`background-image:${input.backgroundImage}`],
+        };
       }
       const { rect } = input;
       if (rect.h <= LINE_THRESHOLD_PX || rect.w <= LINE_THRESHOLD_PX) {

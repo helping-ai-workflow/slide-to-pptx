@@ -62,6 +62,11 @@ export type ImageLeaf = {
 export type DecorBox = {
   rect: Rect;
   background?: string;
+  // Captured when the element has a non-trivial background-image (CSS
+  // gradient or url()). The classifier promotes such decors to
+  // ImageFallback so the gradient/picture renders as an embedded PNG
+  // instead of silently dropping out of the pptx export.
+  backgroundImage?: string;
   borderColor?: string;
   borderWidth: number;
   borderRadii: [number, number, number, number];
@@ -259,6 +264,23 @@ const EXTRACT_SCRIPT = `(() => {
     animationName: cs.animationName && cs.animationName !== 'none' ? cs.animationName : '',
   });
 
+  // Walk up from el (including el itself) to body; return true if any
+  // ancestor has mix-blend-mode != normal. PowerPoint does not honour
+  // CSS blend modes when stamping shapes — multiply-noise overlays end
+  // up painted as solid dark layers, producing 90%+ pixel diffs on
+  // every page of decks that use a paper-grain texture (claude-code-intro
+  // pattern). Skipping these elements at extraction time omits the
+  // decorative overlay from the pptx, leaving the underlying bg intact.
+  const hasBlendModeAncestor = (el) => {
+    let n = el;
+    while (n && n !== document.body && n.nodeType === 1) {
+      const m = getComputedStyle(n).mixBlendMode;
+      if (m && m !== 'normal') return true;
+      n = n.parentElement;
+    }
+    return false;
+  };
+
   const INLINE_TAGS = new Set(['SPAN','EM','STRONG','B','I','A','CODE','SUP','SUB','MARK','U','SMALL','KBD','SAMP','VAR','BR','WBR','NOBR']);
 
   // Pick a usable text color when CSS uses the gradient-text trick
@@ -319,6 +341,7 @@ const EXTRACT_SCRIPT = `(() => {
     if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
     if (INLINE_TAGS.has(el.tagName)) continue; // inline children are folded into parent
     if (el.closest('svg')) continue; // SVG descendants handled by the svgShapes collector
+    if (hasBlendModeAncestor(el)) continue;
 
     // Children-by-type check
     let hasOwnText = false;
@@ -475,9 +498,12 @@ const EXTRACT_SCRIPT = `(() => {
     if (el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'STYLE') continue;
     if (INLINE_TAGS.has(el.tagName)) continue;
     if (el.closest('svg')) continue;
+    if (hasBlendModeAncestor(el)) continue;
 
     const cs = getComputedStyle(el);
     const bg = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? colorRgbToHex(cs.backgroundColor) : '';
+    const bgImg = cs.backgroundImage || '';
+    const hasGradient = bgImg && bgImg !== 'none' && (bgImg.includes('gradient(') || bgImg.includes('url('));
     const sides = {
       t: { w: parsePx(cs.borderTopWidth), c: cs.borderTopColor },
       r: { w: parsePx(cs.borderRightWidth), c: cs.borderRightColor },
@@ -485,7 +511,7 @@ const EXTRACT_SCRIPT = `(() => {
       l: { w: parsePx(cs.borderLeftWidth), c: cs.borderLeftColor },
     };
     const anyBorder = sides.t.w > 0 || sides.r.w > 0 || sides.b.w > 0 || sides.l.w > 0;
-    if (!bg && !anyBorder) continue;
+    if (!bg && !anyBorder && !hasGradient) continue;
 
     const rect = pickRect(el);
     if (rect.w <= 0 || rect.h <= 0) continue;
@@ -498,6 +524,7 @@ const EXTRACT_SCRIPT = `(() => {
     decors.push({
       rect,
       background: bg || '',
+      backgroundImage: hasGradient ? bgImg : '',
       borderColor: uniform ? colorRgbToHex(sides.t.c) : '',
       borderWidth: uniform ? sides.t.w : 0,
       borderRadii: [
@@ -579,6 +606,7 @@ const EXTRACT_SCRIPT = `(() => {
     // <marker>/<defs> children are rendered indirectly via url(#id); their
     // own bbox is zero and would otherwise pollute the output.
     if (el.closest('marker, defs')) continue;
+    if (hasBlendModeAncestor(el)) continue;
     const cs = getComputedStyle(el);
     if (tag === 'path') {
       const totalLen = el.getTotalLength ? el.getTotalLength() : 0;
@@ -820,6 +848,7 @@ export async function measureSlide(
           type: 'decor',
           rect: d.rect,
           background: d.background,
+          backgroundImage: d.backgroundImage,
           borderWidth: d.borderWidth,
           cssFeatureFlags: d.cssFeatureFlags,
         });

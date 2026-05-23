@@ -269,8 +269,16 @@ export function measureToIR(m: PageMeasure): IRPage {
   //    z-stack in every bucket. Otherwise an outer card's white panel would
   //    paint on top of the BitField groups it contains and hide them.
   let decorN = 0;
+  let bgOverride: string | undefined;
   for (const d of m.decors) {
-    if (d.rect.w * d.rect.h > CANVAS_AREA * 0.9) continue;
+    if (d.rect.w * d.rect.h > CANVAS_AREA * 0.9) {
+      // Full-bleed wrapper: don't emit as a shape (would paint over content),
+      // but capture its solid background colour so pptx-build can apply it
+      // as the slide background. Later, larger overrides win (the outermost
+      // wrapper is iterated last under the normal DOM order).
+      if (d.background) bgOverride = d.background;
+      continue;
+    }
     if (d.groupId && suppressedPrimIds.has(d.groupId)) continue; // baked into primitive screenshot
     const decor: IRDecorBox = {
       kind: 'Decor',
@@ -287,6 +295,7 @@ export function measureToIR(m: PageMeasure): IRPage {
       type: 'decor',
       rect: d.rect,
       background: d.background,
+      backgroundImage: d.backgroundImage,
       borderWidth: d.borderWidth,
       cssFeatureFlags: d.cssFeatureFlags,
     });
@@ -431,5 +440,6 @@ export function measureToIR(m: PageMeasure): IRPage {
     pageName: m.pageName,
     size: { w: CANVAS_W, h: CANVAS_H },
     items: buckets.get(null) ?? [],
+    bgOverride,
   };
 }
